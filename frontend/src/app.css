@@ -1,0 +1,47 @@
+@import "tailwindcss";
+
+@theme {
+  --color-joule-50: #fffbeb;
+  --color-joule-100: #fef3c7;
+  --color-joule-200: #fde68a;
+  --color-joule-300: #fcd34d;
+  --color-joule-400: #fbbf24;
+  --color-joule-500: #f59e0b;
+  --color-joule-600: #d97706;
+  --color-joule-700: #b45309;
+  --color-joule-800: #92400e;
+  --color-joule-900: #78350f;
+
+  --color-surface: #0f172a;
+  --color-surface-light: #1e293b;
+  --color-surface-lighter: #334155;
+}
+
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-surface-lighter) transparent;
+  }
+
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+}
+
+html.light {
+  --color-surface: #f8fafc;
+  --color-surface-light: #ffffff;
+  --color-surface-lighter: #e2e8f0;
+}
+
+html.light body {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+html.dark body {
+  background-color: #020617;
+  color: #f8fafc;
+}

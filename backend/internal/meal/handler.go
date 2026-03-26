@@ -1,0 +1,425 @@
+package meal
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"joule/internal/ai"
+	"joule/internal/db/sqlc"
+)
+
+type contextKey string
+
+type Handler struct {
+	q         *sqlc.Queries
+	ai        ai.Client
+	uploadDir string
+}
+
+func NewHandler(q *sqlc.Queries, aiClient ai.Client, uploadDir string) *Handler {
+	return &Handler{q: q, ai: aiClient, uploadDir: uploadDir}
+}
+
+type apiResponse struct {
+	Data  any    `json:"data,omitempty"`
+	Error string `json:"error,omitempty"`
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v)
+}
+
+func writeError(w http.ResponseWriter, status int, err error) {
+	slog.Error("request error", "status", status, "error", err)
+	writeJSON(w, status, apiResponse{Error: err.Error()})
+}
+
+func getUserID(r *http.Request) string {
+	return r.Context().Value(contextKey("userID")).(string)
+}
+
+func floatToNumeric(f float64) pgtype.Numeric {
+	n := pgtype.Numeric{}
+	_ = n.Scan(fmt.Sprintf("%.2f", f))
+	return n
+}
+
+func numericToFloat(n pgtype.Numeric) float64 {
+	if !n.Valid {
+		return 0
+	}
+	f, _ := n.Float64Value()
+	return f.Float64
+}
+
+func stringPtr(v string) *string {
+	if v == "" {
+		return nil
+	}
+	return &v
+}
+
+var validMealTypes = map[string]bool{
+	"breakfast": true,
+	"lunch":     true,
+	"dinner":    true,
+	"snack":     true,
+}
+
+func mealToResponse(m sqlc.Meal, foods []sqlc.FoodItem) MealResponse {
+	resp := MealResponse{
+		ID:        m.ID,
+		Timestamp: m.Timestamp.Format(time.RFC3339),
+		MealType:  m.MealType,
+		PhotoPath: m.PhotoPath,
+		Note:      m.Note,
+	}
+	for _, f := range foods {
+		resp.Foods = append(resp.Foods, FoodItemResponse{
+			ID:          f.ID,
+			Name:        f.Name,
+			Calories:    f.Calories,
+			ProteinG:    numericToFloat(f.ProteinG),
+			CarbsG:      numericToFloat(f.CarbsG),
+			FatG:        numericToFloat(f.FatG),
+			FiberG:      numericToFloat(f.FiberG),
+			ServingSize: f.ServingSize,
+			Source:      f.Source,
+		})
+	}
+	return resp
+}
+
+func (h *Handler) CreateMeal(w http.ResponseWriter, r *http.Request) {
+	var req CreateMealRequest
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	if !validMealTypes[req.MealType] {
+		writeError(w, http.StatusBadRequest, errors.New("meal_type must be breakfast, lunch, dinner, or snack"))
+		return
+	}
+
+	userID := getUserID(r)
+	timestamp := time.Now()
+
+	var photoPath *string
+
+	var aiFoods []ManualFood
+
+	if req.Photo != "" {
+		imageBytes, filename, err := decodePhotoData(req.Photo, userID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("invalid photo: %w", err))
+			return
+		}
+
+		dir := fmt.Sprintf("%s/%s", h.uploadDir, userID)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Errorf("create upload dir: %w", err))
+			return
+		}
+
+		filePath := fmt.Sprintf("%s/%s", dir, filename)
+		if err := os.WriteFile(filePath, imageBytes, 0644); err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Errorf("save photo: %w", err))
+			return
+		}
+
+		relPath := fmt.Sprintf("uploads/%s/%s", userID, filename)
+		photoPath = &relPath
+
+		if h.ai != nil {
+			identified, err := h.ai.IdentifyFood(imageBytes)
+			if err != nil {
+				slog.Error("ai food identification failed", "error", err)
+			} else {
+				for _, food := range identified {
+					aiFoods = append(aiFoods, ManualFood{
+						Name:        food.Name,
+						Calories:    food.Calories,
+						ProteinG:    food.ProteinG,
+						CarbsG:      food.CarbsG,
+						FatG:        food.FatG,
+						FiberG:      food.FiberG,
+						ServingSize: food.ServingSize,
+					})
+				}
+			}
+		}
+	}
+
+	var note *string
+	if req.Note != "" {
+		note = &req.Note
+	}
+
+	meal, err := h.q.CreateMeal(r.Context(), sqlc.CreateMealParams{
+		UserID:    userID,
+		Timestamp: timestamp,
+		MealType:  req.MealType,
+		PhotoPath: photoPath,
+		Note:      note,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("create meal: %w", err))
+		return
+	}
+
+	for i := range req.Foods {
+		_, err := h.q.CreateFoodItem(r.Context(), sqlc.CreateFoodItemParams{
+			MealID:      meal.ID,
+			Name:        req.Foods[i].Name,
+			Calories:    int32(req.Foods[i].Calories),
+			ProteinG:    floatToNumeric(req.Foods[i].ProteinG),
+			CarbsG:      floatToNumeric(req.Foods[i].CarbsG),
+			FatG:        floatToNumeric(req.Foods[i].FatG),
+			FiberG:      floatToNumeric(req.Foods[i].FiberG),
+			ServingSize: stringPtr(req.Foods[i].ServingSize),
+			Source:      "manual",
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Errorf("create food item: %w", err))
+			return
+		}
+	}
+
+	for i := range aiFoods {
+		_, err := h.q.CreateFoodItem(r.Context(), sqlc.CreateFoodItemParams{
+			MealID:      meal.ID,
+			Name:        aiFoods[i].Name,
+			Calories:    int32(aiFoods[i].Calories),
+			ProteinG:    floatToNumeric(aiFoods[i].ProteinG),
+			CarbsG:      floatToNumeric(aiFoods[i].CarbsG),
+			FatG:        floatToNumeric(aiFoods[i].FatG),
+			FiberG:      floatToNumeric(aiFoods[i].FiberG),
+			ServingSize: stringPtr(aiFoods[i].ServingSize),
+			Source:      "ai",
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Errorf("create food item: %w", err))
+			return
+		}
+	}
+
+	foods, err := h.q.GetFoodItemsByMeal(r.Context(), meal.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("get food items: %w", err))
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, apiResponse{Data: mealToResponse(meal, foods)})
+}
+
+func decodePhotoData(dataURL, userID string) ([]byte, string, error) {
+	commaIdx := strings.Index(dataURL, ",")
+	if commaIdx == -1 {
+		return nil, "", errors.New("invalid data URL format")
+	}
+
+	header := dataURL[:commaIdx]
+	b64Data := dataURL[commaIdx+1:]
+
+	var ext string
+	switch {
+	case strings.Contains(header, "image/png"):
+		ext = ".png"
+	case strings.Contains(header, "image/webp"):
+		ext = ".webp"
+	default:
+		ext = ".jpg"
+	}
+
+	imageBytes, err := base64.StdEncoding.DecodeString(b64Data)
+	if err != nil {
+		return nil, "", fmt.Errorf("decode base64: %w", err)
+	}
+
+	filename := uuid.New().String() + ext
+	return imageBytes, filename, nil
+}
+
+func (h *Handler) GetMealsByDate(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r)
+
+	dateStr := r.URL.Query().Get("date")
+	var date time.Time
+	if dateStr != "" {
+		var err error
+		date, err = time.Parse("2006-01-02", dateStr)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("invalid date format: %w", err))
+			return
+		}
+	} else {
+		date = time.Now()
+	}
+
+	meals, err := h.q.GetMealsByDate(r.Context(), sqlc.GetMealsByDateParams{
+		UserID:    userID,
+		Timestamp: date,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("get meals: %w", err))
+		return
+	}
+
+	var mealResponses []MealResponse
+	for _, m := range meals {
+		foods, err := h.q.GetFoodItemsByMeal(r.Context(), m.ID)
+		if err != nil {
+			slog.Error("get food items for meal", "meal_id", m.ID, "error", err)
+			continue
+		}
+		mealResponses = append(mealResponses, mealToResponse(m, foods))
+	}
+
+	summary, err := h.q.GetDailySummary(r.Context(), sqlc.GetDailySummaryParams{
+		UserID:    userID,
+		Timestamp: date,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("get daily summary: %w", err))
+		return
+	}
+
+	if mealResponses == nil {
+		mealResponses = []MealResponse{}
+	}
+
+	writeJSON(w, http.StatusOK, apiResponse{Data: DailyLogResponse{
+		Meals:         mealResponses,
+		TotalCalories: summary.TotalCalories,
+		TotalProtein:  summary.TotalProtein,
+		TotalCarbs:    summary.TotalCarbs,
+		TotalFat:      summary.TotalFat,
+		TotalFiber:    summary.TotalFiber,
+	}})
+}
+
+func (h *Handler) GetRecentMeals(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r)
+
+	meals, err := h.q.GetRecentMeals(r.Context(), userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("get recent meals: %w", err))
+		return
+	}
+
+	var mealResponses []MealResponse
+	for _, m := range meals {
+		foods, err := h.q.GetFoodItemsByMeal(r.Context(), m.ID)
+		if err != nil {
+			slog.Error("get food items for meal", "meal_id", m.ID, "error", err)
+			continue
+		}
+		mealResponses = append(mealResponses, mealToResponse(m, foods))
+	}
+
+	if mealResponses == nil {
+		mealResponses = []MealResponse{}
+	}
+
+	writeJSON(w, http.StatusOK, apiResponse{Data: mealResponses})
+}
+
+func (h *Handler) DeleteMeal(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	userID := getUserID(r)
+
+	if _, err := h.q.GetMealByID(r.Context(), sqlc.GetMealByIDParams{
+		ID:     id,
+		UserID: userID,
+	}); err != nil {
+		writeError(w, http.StatusNotFound, fmt.Errorf("meal not found: %w", err))
+		return
+	}
+
+	if err := h.q.DeleteMeal(r.Context(), sqlc.DeleteMealParams{
+		ID:     id,
+		UserID: userID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("delete meal: %w", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, apiResponse{Data: map[string]string{"message": "meal deleted"}})
+}
+
+func (h *Handler) UpdateFoodItem(w http.ResponseWriter, r *http.Request) {
+	foodID := chi.URLParam(r, "foodId")
+	mealID := chi.URLParam(r, "mealId")
+	userID := getUserID(r)
+
+	if _, err := h.q.GetMealByID(r.Context(), sqlc.GetMealByIDParams{
+		ID:     mealID,
+		UserID: userID,
+	}); err != nil {
+		writeError(w, http.StatusNotFound, fmt.Errorf("meal not found: %w", err))
+		return
+	}
+
+	var req ManualFood
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	if err := h.q.UpdateFoodItem(r.Context(), sqlc.UpdateFoodItemParams{
+		Name:        req.Name,
+		Calories:    int32(req.Calories),
+		ProteinG:    floatToNumeric(req.ProteinG),
+		CarbsG:      floatToNumeric(req.CarbsG),
+		FatG:        floatToNumeric(req.FatG),
+		FiberG:      floatToNumeric(req.FiberG),
+		ServingSize: stringPtr(req.ServingSize),
+		ID:          foodID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("update food item: %w", err))
+		return
+	}
+
+	foods, err := h.q.GetFoodItemsByMeal(r.Context(), mealID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("get food items: %w", err))
+		return
+	}
+
+	for _, f := range foods {
+		if f.ID == foodID {
+			writeJSON(w, http.StatusOK, apiResponse{Data: FoodItemResponse{
+				ID:          f.ID,
+				Name:        f.Name,
+				Calories:    f.Calories,
+				ProteinG:    numericToFloat(f.ProteinG),
+				CarbsG:      numericToFloat(f.CarbsG),
+				FatG:        numericToFloat(f.FatG),
+				FiberG:      numericToFloat(f.FiberG),
+				ServingSize: f.ServingSize,
+				Source:      f.Source,
+			}})
+			return
+		}
+	}
+
+	writeError(w, http.StatusNotFound, errors.New("food item not found"))
+}

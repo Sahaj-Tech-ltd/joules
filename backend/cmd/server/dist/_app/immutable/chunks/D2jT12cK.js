@@ -1,0 +1,1 @@
+import{w as n}from"./bzij8sXQ.js";function a(){const o=typeof window<"u"?localStorage.getItem("auth_token"):null,t=n(o);return{subscribe:t.subscribe,set:e=>{typeof window<"u"&&(e?localStorage.setItem("auth_token",e):localStorage.removeItem("auth_token")),t.set(e)}}}const r=a();export{r as a};

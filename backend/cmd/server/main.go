@@ -1,0 +1,193 @@
+package main
+
+import (
+	"context"
+	"embed"
+	"fmt"
+	"io/fs"
+	"log/slog"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	chicors "github.com/go-chi/cors"
+
+	"joule/internal/achievement"
+	"joule/internal/ai"
+	"joule/internal/auth"
+	"joule/internal/coach"
+	"joule/internal/config"
+	"joule/internal/dashboard"
+	"joule/internal/db"
+	"joule/internal/db/sqlc"
+	"joule/internal/exercise"
+	"joule/internal/export"
+	"joule/internal/meal"
+	"joule/internal/user"
+	"joule/internal/water"
+	"joule/internal/weight"
+)
+
+//go:embed all:dist
+var frontendFS embed.FS
+
+func main() {
+	cfg, err := config.Load()
+	if err != nil {
+		slog.Error("failed to load config", "error", err)
+		os.Exit(1)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
+	if err != nil {
+		slog.Error("failed to connect to database", "error", err)
+		os.Exit(1)
+	}
+	defer pool.Close()
+
+	queries := sqlc.New(pool)
+	authSvc := auth.NewService(queries, cfg)
+	authHandler := auth.NewHandler(authSvc)
+	userHandler := user.NewHandler(queries)
+
+	aiClient, _ := ai.NewClient(ai.Config{
+		Provider:     cfg.AIProvider,
+		OpenAIKey:    cfg.OpenAIKey,
+		AnthropicKey: cfg.AnthropicKey,
+		Model:        cfg.AIModel,
+	})
+	mealHandler := meal.NewHandler(queries, aiClient, cfg.UploadDir)
+	dashHandler := dashboard.NewHandler(queries)
+	weightHandler := weight.NewHandler(queries)
+	waterHandler := water.NewHandler(queries)
+	exerciseHandler := exercise.NewHandler(queries)
+	coachHandler := coach.NewHandler(queries, aiClient)
+	achievementHandler := achievement.NewHandler(queries)
+	exportHandler := export.NewHandler(queries)
+
+	r := chi.NewRouter()
+
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
+	r.Use(middleware.Logger)
+	r.Use(middleware.Recoverer)
+	r.Use(chicors.Handler(chicors.Options{
+		AllowedOrigins:   []string{cfg.AppURL, "http://localhost:5173"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Content-Type", "Authorization"},
+		AllowCredentials: true,
+	}))
+
+	r.Route("/api", func(r chi.Router) {
+		r.Route("/auth", func(r chi.Router) {
+			r.Post("/signup", authHandler.Signup)
+			r.Post("/verify", authHandler.Verify)
+			r.Post("/login", authHandler.Login)
+			r.Post("/refresh", authHandler.Refresh)
+
+			r.Group(func(r chi.Router) {
+				r.Use(auth.JWTMiddleware(cfg.JWTSecret))
+				r.Get("/me", authHandler.Me)
+			})
+		})
+
+		r.Route("/user", func(r chi.Router) {
+			r.Use(auth.JWTMiddleware(cfg.JWTSecret))
+			r.Post("/onboarding", userHandler.CompleteOnboarding)
+			r.Get("/profile", userHandler.GetProfile)
+			r.Put("/profile", userHandler.UpdateProfile)
+			r.Get("/goals", userHandler.GetGoals)
+		})
+
+		r.Route("/meals", func(r chi.Router) {
+			r.Use(auth.JWTMiddleware(cfg.JWTSecret))
+			r.Post("/", mealHandler.CreateMeal)
+			r.Get("/", mealHandler.GetMealsByDate)
+			r.Get("/recent", mealHandler.GetRecentMeals)
+			r.Delete("/{id}", mealHandler.DeleteMeal)
+			r.Put("/{mealId}/foods/{foodId}", mealHandler.UpdateFoodItem)
+		})
+
+		r.Route("/dashboard", func(r chi.Router) {
+			r.Use(auth.JWTMiddleware(cfg.JWTSecret))
+			r.Get("/summary", dashHandler.GetSummary)
+		})
+
+		r.Route("/weight", func(r chi.Router) {
+			r.Use(auth.JWTMiddleware(cfg.JWTSecret))
+			r.Post("/", weightHandler.LogWeight)
+			r.Get("/", weightHandler.GetWeightHistory)
+		})
+
+		r.Route("/water", func(r chi.Router) {
+			r.Use(auth.JWTMiddleware(cfg.JWTSecret))
+			r.Post("/", waterHandler.LogWater)
+			r.Get("/", waterHandler.GetWaterByDate)
+		})
+
+		r.Route("/exercises", func(r chi.Router) {
+			r.Use(auth.JWTMiddleware(cfg.JWTSecret))
+			r.Post("/", exerciseHandler.LogExercise)
+			r.Get("/", exerciseHandler.GetExercisesByDate)
+		})
+
+		r.Route("/coach", func(r chi.Router) {
+			r.Use(auth.JWTMiddleware(cfg.JWTSecret))
+			r.Get("/tips", coachHandler.GetTips)
+			r.Get("/chat", coachHandler.GetChatHistory)
+			r.Post("/chat", coachHandler.SendMessage)
+		})
+
+		r.Route("/achievements", func(r chi.Router) {
+			r.Use(auth.JWTMiddleware(cfg.JWTSecret))
+			r.Get("/", achievementHandler.GetAchievements)
+			r.Post("/check", achievementHandler.CheckAchievements)
+		})
+
+		r.Route("/export", func(r chi.Router) {
+			r.Use(auth.JWTMiddleware(cfg.JWTSecret))
+			r.Get("/csv", exportHandler.ExportCSV)
+		})
+	})
+
+	r.Handle("/uploads/*", http.StripPrefix("/uploads/", http.FileServer(http.Dir(cfg.UploadDir))))
+
+	serveFrontend(r)
+
+	addr := fmt.Sprintf(":%s", cfg.Port)
+	slog.Info("starting server", "addr", addr)
+	if err := http.ListenAndServe(addr, r); err != nil {
+		slog.Error("server failed", "error", err)
+		os.Exit(1)
+	}
+}
+
+func serveFrontend(r chi.Router) {
+	distFS, err := fs.Sub(frontendFS, "dist")
+	if err != nil {
+		slog.Warn("no embedded frontend found, running API-only mode")
+		return
+	}
+
+	fileServer := http.FileServer(http.FS(distFS))
+
+	r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
+		path := strings.TrimPrefix(req.URL.Path, "/")
+
+		if path != "" {
+			if _, err := distFS.Open(path); err == nil {
+				fileServer.ServeHTTP(w, req)
+				return
+			}
+		}
+
+		req.URL.Path = "/"
+		fileServer.ServeHTTP(w, req)
+	})
+}
