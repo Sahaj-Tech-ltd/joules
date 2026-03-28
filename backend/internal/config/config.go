@@ -18,6 +18,7 @@ type Config struct {
 	AnthropicKey   string
 	AIModel        string
 	TavilyAPIKey   string
+	OCRProvider    string
 	SMTPHost     string
 	SMTPPort     int
 	SMTPUser     string
@@ -40,6 +41,7 @@ func Load() (*Config, error) {
 		AnthropicKey:  os.Getenv("ANTHROPIC_API_KEY"),
 		AIModel:       os.Getenv("AI_MODEL"),
 		TavilyAPIKey:  os.Getenv("TAVILY_API_KEY"),
+		OCRProvider:   getEnv("OCR_PROVIDER", ""),
 		SMTPHost:    os.Getenv("SMTP_HOST"),
 		SMTPUser:    os.Getenv("SMTP_USER"),
 		SMTPPass:    os.Getenv("SMTP_PASS"),

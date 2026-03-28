@@ -67,7 +67,7 @@ func main() {
 		AnthropicKey:  cfg.AnthropicKey,
 		Model:         cfg.AIModel,
 	})
-	mealHandler := meal.NewHandler(queries, aiClient, cfg.UploadDir)
+	mealHandler := meal.NewHandler(queries, aiClient, cfg.UploadDir, cfg)
 	dashHandler := dashboard.NewHandler(queries, pool)
 	weightHandler := weight.NewHandler(queries)
 	waterHandler := water.NewHandler(queries)

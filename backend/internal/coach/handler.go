@@ -6,7 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"io"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -489,6 +492,36 @@ func (h *Handler) agentTools() []ai.Tool {
 		})
 	}
 
+	tools = append(tools, ai.Tool{
+		Name:        "fetch_url",
+		Description: "Fetch the text content of a URL. Use this to retrieve nutrition info from restaurant websites, food brand pages, or health articles. Only use with http/https URLs.",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"url": map[string]interface{}{
+					"type":        "string",
+					"description": "The URL to fetch (must start with http:// or https://)",
+				},
+			},
+			"required": []string{"url"},
+		},
+	})
+
+	tools = append(tools, ai.Tool{
+		Name:        "lookup_nutrition",
+		Description: "Look up nutrition information for a specific food or menu item. Checks a persistent cache first, then searches the web. Results are stored globally for future queries.",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"food_name": map[string]interface{}{
+					"type":        "string",
+					"description": "The food or menu item to look up (e.g. 'Taco Bell Crunchy Taco', 'Big Mac', 'Chipotle Chicken Bowl')",
+				},
+			},
+			"required": []string{"food_name"},
+		},
+	})
+
 	return tools
 }
 
@@ -670,6 +703,40 @@ func (h *Handler) executeTool(ctx context.Context, userID string, toolName strin
 		}
 		return result
 
+	case "fetch_url":
+		var args struct {
+			URL string `json:"url"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return fmt.Sprintf("error: invalid arguments: %v", err)
+		}
+		if !strings.HasPrefix(args.URL, "http://") && !strings.HasPrefix(args.URL, "https://") {
+			return "error: URL must start with http:// or https://"
+		}
+		text, err := h.fetchURL(args.URL)
+		if err != nil {
+			slog.Error("fetch_url tool failed", "error", err)
+			return fmt.Sprintf("error fetching URL: %v", err)
+		}
+		return text
+
+	case "lookup_nutrition":
+		var args struct {
+			FoodName string `json:"food_name"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return fmt.Sprintf("error: invalid arguments: %v", err)
+		}
+		if args.FoodName == "" {
+			return "error: food_name is required"
+		}
+		result, err := h.lookupNutrition(ctx, args.FoodName)
+		if err != nil {
+			slog.Error("lookup_nutrition tool failed", "error", err)
+			return fmt.Sprintf("error looking up nutrition: %v", err)
+		}
+		return result
+
 	default:
 		return fmt.Sprintf("error: unknown tool '%s'", toolName)
 	}
@@ -841,4 +908,175 @@ Tool use guidelines:
 		Content:   saved.Content,
 		CreatedAt: saved.CreatedAt.Format(time.RFC3339),
 	}})
+}
+
+// fetchURL fetches a URL and returns its text content (HTML stripped).
+// Limited to 3000 characters to keep AI context manageable.
+func (h *Handler) fetchURL(rawURL string) (string, error) {
+	// Validate URL
+	parsed, err := url.ParseRequestURI(rawURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return "", fmt.Errorf("invalid URL")
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; Joules-Bot/1.0)")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("fetch failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	// Read body (cap at 512 KB to avoid giant pages)
+	limited := io.LimitReader(resp.Body, 512*1024)
+	body, err := io.ReadAll(limited)
+	if err != nil {
+		return "", fmt.Errorf("read body: %w", err)
+	}
+
+	text := stripHTML(string(body))
+
+	// Truncate to 3000 chars
+	if len(text) > 3000 {
+		text = text[:3000] + "\n[content truncated]"
+	}
+	return text, nil
+}
+
+var (
+	reHTMLTags    = regexp.MustCompile(`<[^>]+>`)
+	reWhitespace  = regexp.MustCompile(`\s{2,}`)
+	reHTMLEntities = regexp.MustCompile(`&[a-zA-Z]+;|&#\d+;`)
+)
+
+func stripHTML(html string) string {
+	// Remove script and style blocks entirely
+	re := regexp.MustCompile(`(?si)<(script|style)[^>]*>.*?</(script|style)>`)
+	text := re.ReplaceAllString(html, " ")
+	text = reHTMLTags.ReplaceAllString(text, " ")
+	text = reHTMLEntities.ReplaceAllString(text, " ")
+	text = reWhitespace.ReplaceAllString(text, " ")
+	return strings.TrimSpace(text)
+}
+
+// lookupNutrition checks the DB cache for a food, then falls back to web search.
+// Results are stored in nutrition_cache for future queries.
+func (h *Handler) lookupNutrition(ctx context.Context, foodName string) (string, error) {
+	// 1. Check cache
+	cached, err := h.q.GetNutritionCache(ctx, foodName)
+	if err == nil {
+		slog.Info("nutrition cache hit", "food", foodName)
+		return fmt.Sprintf(
+			`Nutrition info for "%s" (cached, source: %s):
+Serving: %s
+Calories: %d kcal | Protein: %.1fg | Carbs: %.1fg | Fat: %.1fg | Fiber: %.1fg`,
+			cached.Name, cached.Source, cached.ServingSize,
+			cached.Calories,
+			numericToFloat(cached.ProteinG),
+			numericToFloat(cached.CarbsG),
+			numericToFloat(cached.FatG),
+			numericToFloat(cached.FiberG),
+		), nil
+	}
+
+	// 2. Web search fallback (Tavily)
+	if h.cfg == nil || h.cfg.TavilyAPIKey == "" {
+		return fmt.Sprintf("No cached data found for \"%s\" and web search is not configured (TAVILY_API_KEY not set).", foodName), nil
+	}
+
+	slog.Info("nutrition cache miss, searching web", "food", foodName)
+	searchResult, err := ai.SearchWeb(h.cfg.TavilyAPIKey, foodName+" calories nutrition facts per serving")
+	if err != nil {
+		return "", fmt.Errorf("web search failed: %w", err)
+	}
+
+	// 3. Ask AI to parse the search result into structured nutrition data
+	parsePrompt := fmt.Sprintf(
+		`Extract nutrition information for "%s" from the search results below.
+Return ONLY a JSON object: {"name":"...","calories":0,"protein_g":0,"carbs_g":0,"fat_g":0,"fiber_g":0,"serving_size":"..."}
+If you cannot find reliable data, return {"error":"not found"}.
+No explanation, no markdown.
+
+Search results:
+%s`, foodName, searchResult)
+
+	parsed, err := h.ai.Chat(parsePrompt, nil)
+	if err != nil {
+		return searchResult, nil // return raw search if AI parse fails
+	}
+
+	parsed = strings.TrimSpace(parsed)
+	if strings.HasPrefix(parsed, "```") {
+		if idx := strings.Index(parsed, "\n"); idx != -1 {
+			parsed = parsed[idx+1:]
+		}
+		parsed = strings.TrimSuffix(parsed, "```")
+		parsed = strings.TrimSpace(parsed)
+	}
+
+	var nutrition struct {
+		Name        string  `json:"name"`
+		Calories    int     `json:"calories"`
+		ProteinG    float64 `json:"protein_g"`
+		CarbsG      float64 `json:"carbs_g"`
+		FatG        float64 `json:"fat_g"`
+		FiberG      float64 `json:"fiber_g"`
+		ServingSize string  `json:"serving_size"`
+		Error       string  `json:"error"`
+	}
+
+	if err := json.Unmarshal([]byte(parsed), &nutrition); err != nil || nutrition.Error != "" {
+		return fmt.Sprintf("Found web data for \"%s\" but couldn't parse it precisely:\n%s", foodName, searchResult), nil
+	}
+
+	if nutrition.Name == "" {
+		nutrition.Name = foodName
+	}
+	if nutrition.ServingSize == "" {
+		nutrition.ServingSize = "1 serving"
+	}
+
+	// 4. Store in cache for future use
+	proteinN := pgtype.Numeric{}
+	_ = proteinN.Scan(fmt.Sprintf("%.2f", nutrition.ProteinG))
+	carbsN := pgtype.Numeric{}
+	_ = carbsN.Scan(fmt.Sprintf("%.2f", nutrition.CarbsG))
+	fatN := pgtype.Numeric{}
+	_ = fatN.Scan(fmt.Sprintf("%.2f", nutrition.FatG))
+	fiberN := pgtype.Numeric{}
+	_ = fiberN.Scan(fmt.Sprintf("%.2f", nutrition.FiberG))
+
+	_, cacheErr := h.q.UpsertNutritionCache(ctx, sqlc.UpsertNutritionCacheParams{
+		Query:       foodName,
+		Name:        nutrition.Name,
+		Calories:    int32(nutrition.Calories),
+		ProteinG:    proteinN,
+		CarbsG:      carbsN,
+		FatG:        fatN,
+		FiberG:      fiberN,
+		ServingSize: nutrition.ServingSize,
+		Source:      "web",
+	})
+	if cacheErr != nil {
+		slog.Warn("failed to cache nutrition data", "food", foodName, "error", cacheErr)
+	} else {
+		slog.Info("nutrition data cached", "food", foodName)
+	}
+
+	return fmt.Sprintf(
+		`Nutrition info for "%s" (source: web, now cached):
+Serving: %s
+Calories: %d kcal | Protein: %.1fg | Carbs: %.1fg | Fat: %.1fg | Fiber: %.1fg`,
+		nutrition.Name, nutrition.ServingSize,
+		nutrition.Calories, nutrition.ProteinG, nutrition.CarbsG, nutrition.FatG, nutrition.FiberG,
+	), nil
 }

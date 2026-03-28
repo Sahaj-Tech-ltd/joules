@@ -369,3 +369,81 @@ func (c *AnthropicClient) IdentifyFood(imageData []byte, hint string) ([]Identif
 
 	return foods, nil
 }
+
+const anthropicOCRParsePrompt = `You are a nutrition analysis assistant. Extract food items and their nutrition values from the provided OCR text.
+
+Instructions:
+- The text was extracted via OCR from a food photo (nutrition label, menu, receipt, packaging, or food description).
+- Parse every distinct food or drink item mentioned.
+- For Nutrition Facts labels: use the exact calorie, protein, carbs, fat, and fiber values from the label.
+- For menus or food descriptions: estimate macros from standard nutritional databases.
+- Return ONLY a raw JSON array — no markdown, no code fences, no explanation.
+- Each element: { "name": string, "calories": number, "protein_g": number, "carbs_g": number, "fat_g": number, "fiber_g": number, "serving_size": string, "confidence": number (0-1) }
+- confidence: 0.95+ for values read from a label, 0.6-0.8 for estimates.
+- If no food data is found, return [].`
+
+func (c *AnthropicClient) IdentifyFoodFromText(ocrText, hint string) ([]IdentifiedFood, error) {
+	userContent := "OCR text from food image:\n\n" + ocrText
+	if hint != "" {
+		userContent += "\n\nUser context: " + hint
+	}
+
+	reqBody := anthropicRequest{
+		Model:     c.model,
+		MaxTokens: 1000,
+		System:    anthropicOCRParsePrompt,
+		Messages:  []anthropicMessage{{Role: "user", Content: []any{map[string]string{"type": "text", "text": userContent}}}},
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages", bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", c.apiKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errBody map[string]any
+		json.NewDecoder(resp.Body).Decode(&errBody)
+		return nil, fmt.Errorf("anthropic api returned status %d", resp.StatusCode)
+	}
+
+	var anthResp anthropicResponse
+	if err := json.NewDecoder(resp.Body).Decode(&anthResp); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+
+	content := ""
+	for _, block := range anthResp.Content {
+		if block.Type == "text" {
+			content = strings.TrimSpace(block.Text)
+			break
+		}
+	}
+
+	if strings.HasPrefix(content, "```") {
+		if idx := strings.Index(content, "\n"); idx != -1 {
+			content = content[idx+1:]
+		}
+		content = strings.TrimSuffix(content, "```")
+		content = strings.TrimSpace(content)
+	}
+
+	var foods []IdentifiedFood
+	if err := json.Unmarshal([]byte(content), &foods); err != nil {
+		return nil, fmt.Errorf("parse food json: %w", err)
+	}
+	return foods, nil
+}

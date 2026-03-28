@@ -50,6 +50,9 @@ type Client interface {
 	// hint is an optional user-provided description of portion size / context.
 	// Pass "" if not provided.
 	IdentifyFood(imageData []byte, hint string) ([]IdentifiedFood, error)
+	// IdentifyFoodFromText parses nutrition data from OCR-extracted text.
+	// Used when OCR_PROVIDER=tesseract — avoids sending the image to the vision model.
+	IdentifyFoodFromText(ocrText, hint string) ([]IdentifiedFood, error)
 	Chat(systemPrompt string, messages []ChatMessage) (string, error)
 	// ChatAgent runs a chat with tool-calling support.
 	// If tools is empty or the provider doesn't support tools, falls back to Chat.

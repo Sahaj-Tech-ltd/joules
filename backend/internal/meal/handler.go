@@ -17,6 +17,7 @@ import (
 
 	"joule/internal/ai"
 	"joule/internal/auth"
+	"joule/internal/config"
 	"joule/internal/db/sqlc"
 	syslog "joule/internal/syslog"
 )
@@ -26,10 +27,11 @@ type Handler struct {
 	q         *sqlc.Queries
 	ai        ai.Client
 	uploadDir string
+	cfg       *config.Config
 }
 
-func NewHandler(q *sqlc.Queries, aiClient ai.Client, uploadDir string) *Handler {
-	return &Handler{q: q, ai: aiClient, uploadDir: uploadDir}
+func NewHandler(q *sqlc.Queries, aiClient ai.Client, uploadDir string, cfg *config.Config) *Handler {
+	return &Handler{q: q, ai: aiClient, uploadDir: uploadDir, cfg: cfg}
 }
 
 type apiResponse struct {
@@ -148,7 +150,7 @@ func (h *Handler) CreateMeal(w http.ResponseWriter, r *http.Request) {
 		photoPath = &relPath
 
 		if h.ai != nil {
-			identified, err := h.ai.IdentifyFood(imageBytes, req.PortionHint)
+			identified, err := h.identifyFoodFromPhoto(imageBytes, req.PortionHint, getUserID(r))
 			if err != nil {
 				slog.Error("ai food identification failed", "error", err)
 				syslog.Error("ai", "Photo food identification failed", map[string]any{"user_id": getUserID(r), "error": err.Error()})
@@ -501,4 +503,40 @@ func (h *Handler) CarryForward(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, apiResponse{Data: mealToResponse(meal, createdFoods)})
+}
+
+// identifyFoodFromPhoto runs food identification on a photo.
+// If OCR_PROVIDER=tesseract and Tesseract is available, it extracts text via
+// Tesseract first, then uses a cheaper text-only AI call. This improves accuracy
+// on nutrition labels and avoids expensive vision tokens.
+// Falls back to standard AI vision if OCR is not configured or fails.
+func (h *Handler) identifyFoodFromPhoto(imageData []byte, hint, userID string) ([]ai.IdentifiedFood, error) {
+	useOCR := h.cfg != nil && h.cfg.OCRProvider == "tesseract" && ai.IsTesseractAvailable()
+
+	if useOCR {
+		// Preprocess image for better OCR accuracy (grayscale)
+		prepared, err := ai.PrepareForOCR(imageData)
+		if err != nil {
+			slog.Warn("ocr image prepare failed, using original", "error", err)
+			prepared = imageData
+		}
+
+		ocrText, err := ai.ExtractTextFromImage(prepared)
+		if err != nil {
+			slog.Warn("tesseract ocr failed, falling back to ai vision", "error", err)
+			// Fall through to AI vision below
+		} else if len(ocrText) > 20 {
+			slog.Info("tesseract ocr succeeded", "user_id", userID, "text_len", len(ocrText))
+			syslog.Info("ai", "Tesseract OCR extracted text", map[string]any{
+				"user_id":  userID,
+				"text_len": len(ocrText),
+			})
+			return h.ai.IdentifyFoodFromText(ocrText, hint)
+		} else {
+			slog.Info("tesseract returned little text, falling back to ai vision", "user_id", userID)
+		}
+	}
+
+	// Default: send image directly to AI vision model
+	return h.ai.IdentifyFood(imageData, hint)
 }

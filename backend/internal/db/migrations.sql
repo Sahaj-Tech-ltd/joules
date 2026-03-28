@@ -61,3 +61,19 @@ CREATE TABLE IF NOT EXISTS system_logs (
     details JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Nutrition cache: persists AI/web-fetched nutrition lookups for reuse
+CREATE TABLE IF NOT EXISTS nutrition_cache (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    query TEXT NOT NULL,
+    name TEXT NOT NULL,
+    calories INT NOT NULL DEFAULT 0,
+    protein_g NUMERIC(7,2) NOT NULL DEFAULT 0,
+    carbs_g NUMERIC(7,2) NOT NULL DEFAULT 0,
+    fat_g NUMERIC(7,2) NOT NULL DEFAULT 0,
+    fiber_g NUMERIC(7,2) NOT NULL DEFAULT 0,
+    serving_size TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT 'ai',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS nutrition_cache_query_idx ON nutrition_cache (lower(query));
