@@ -1,0 +1,50 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: joule
+      POSTGRES_PASSWORD: joule
+      POSTGRES_DB: joule
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U joule"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  joule:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      DATABASE_URL: postgres://joule:joule@postgres:5432/joule?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      AI_PROVIDER: ${AI_PROVIDER:-openai}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@joule.local}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      REQUIRE_APPROVAL: ${REQUIRE_APPROVAL:-false}
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  uploads:

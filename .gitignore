@@ -1,0 +1,47 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Database
+*.db
+*.sqlite
+postgres-data/
+
+# Build outputs
+/bin/
+/joule
+backend/server
+__debug_bin
+node_modules/
+.svelte-kit/
+build/
+
+# Compiled frontend (should be rebuilt)
+backend/cmd/server/dist/
+
+# sqlc generated (regenerate with sqlc generate)
+*.sqlc/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Uploads (created at runtime)
+uploads/
+
+# Opencode agent files (not for repo)
+opencode/
+AGENTS.md
+.opencode/
