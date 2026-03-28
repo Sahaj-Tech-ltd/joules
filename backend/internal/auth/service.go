@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"math/big"
 	"net/smtp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -143,7 +144,8 @@ func (s *Service) Signup(email, password string) (*SignupResponse, error) {
 		return nil, fmt.Errorf("create user: %w", err)
 	}
 
-	if s.cfg.SMTPHost != "" {
+	smtpHost, _, _, _ := s.effectiveSMTP()
+	if smtpHost != "" {
 		if err := s.sendVerificationEmail(email, code); err != nil {
 			slog.Warn("failed to send verification email", "error", err, "email", email)
 			slog.Info("verification code (email send failed)", "email", email, "code", code)
@@ -164,6 +166,44 @@ func (s *Service) Signup(email, password string) (*SignupResponse, error) {
 	return &SignupResponse{
 		Message: "Account created. Please verify your email.",
 	}, nil
+}
+
+// effectiveSMTP returns SMTP settings from app_settings (DB overrides) falling back to env config.
+// This allows admins to update SMTP via the admin panel without a restart.
+func (s *Service) effectiveSMTP() (host string, port int, user, pass string) {
+	host, port, user, pass = s.cfg.SMTPHost, s.cfg.SMTPPort, s.cfg.SMTPUser, s.cfg.SMTPPass
+
+	rows, err := s.pool.Query(context.Background(),
+		"SELECT key, value FROM app_settings WHERE key IN ('smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass')")
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			continue
+		}
+		switch k {
+		case "smtp_host":
+			if v != "" {
+				host = v
+			}
+		case "smtp_port":
+			if p, err2 := strconv.Atoi(v); err2 == nil && p > 0 {
+				port = p
+			}
+		case "smtp_user":
+			if v != "" {
+				user = v
+			}
+		case "smtp_pass":
+			if v != "" {
+				pass = v
+			}
+		}
+	}
+	return
 }
 
 // loginAuth implements the SMTP LOGIN auth mechanism (used by cPanel/Exim on port 465).
@@ -224,31 +264,33 @@ func (s *Service) sendVerificationEmail(email, code string) error {
 
 	plainBody := fmt.Sprintf("Hi,\r\n\r\nYour Joule verification code is:\r\n\r\n  %s\r\n\r\nEnter this in the app to complete your signup. It won't expire.\r\n\r\nIf you didn't sign up for Joule, ignore this email.\r\n", code)
 
+	smtpHost, smtpPort, smtpUser, smtpPass := s.effectiveSMTP()
+
 	boundary := "joule-boundary-28f7a3b1"
 	msg := fmt.Sprintf(
 		"From: Joule <%s>\r\nTo: %s\r\nSubject: Your Joule verification code: %s\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"%s\"\r\n\r\n--%s\r\nContent-Type: text/plain; charset=\"UTF-8\"\r\n\r\n%s\r\n--%s\r\nContent-Type: text/html; charset=\"UTF-8\"\r\n\r\n%s\r\n--%s--\r\n",
-		s.cfg.SMTPUser, email, code, boundary,
+		smtpUser, email, code, boundary,
 		boundary, plainBody,
 		boundary, htmlBody,
 		boundary,
 	)
-	addr := fmt.Sprintf("%s:%d", s.cfg.SMTPHost, s.cfg.SMTPPort)
+	addr := fmt.Sprintf("%s:%d", smtpHost, smtpPort)
 
 	// Port 465 uses implicit TLS (SMTPS); port 587 uses STARTTLS
-	if s.cfg.SMTPPort == 465 {
-		tlsConn, err := tls.Dial("tcp", addr, &tls.Config{ServerName: s.cfg.SMTPHost})
+	if smtpPort == 465 {
+		tlsConn, err := tls.Dial("tcp", addr, &tls.Config{ServerName: smtpHost})
 		if err != nil {
 			return err
 		}
-		c, err := smtp.NewClient(tlsConn, s.cfg.SMTPHost)
+		c, err := smtp.NewClient(tlsConn, smtpHost)
 		if err != nil {
 			return err
 		}
 		defer c.Close()
-		if err := c.Auth(loginAuth{s.cfg.SMTPUser, s.cfg.SMTPPass}); err != nil {
+		if err := c.Auth(loginAuth{smtpUser, smtpPass}); err != nil {
 			return err
 		}
-		if err := c.Mail(s.cfg.SMTPUser); err != nil {
+		if err := c.Mail(smtpUser); err != nil {
 			return err
 		}
 		if err := c.Rcpt(email); err != nil {
@@ -264,8 +306,8 @@ func (s *Service) sendVerificationEmail(email, code string) error {
 		return w.Close()
 	}
 
-	auth := smtp.PlainAuth("", s.cfg.SMTPUser, s.cfg.SMTPPass, s.cfg.SMTPHost)
-	return smtp.SendMail(addr, auth, s.cfg.SMTPUser, []string{email}, []byte(msg))
+	auth := smtp.PlainAuth("", smtpUser, smtpPass, smtpHost)
+	return smtp.SendMail(addr, auth, smtpUser, []string{email}, []byte(msg))
 }
 
 func (s *Service) Verify(email, code string) error {

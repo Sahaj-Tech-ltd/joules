@@ -17,6 +17,7 @@ type Config struct {
 	OpenAIBaseURL  string
 	AnthropicKey   string
 	AIModel        string
+	RoutingModel   string
 	TavilyAPIKey   string
 	OCRProvider    string
 	VAPIDPublicKey  string
@@ -45,6 +46,7 @@ func Load() (*Config, error) {
 		OpenAIBaseURL: getEnv("OPENAI_BASE_URL", "https://api.openai.com"),
 		AnthropicKey:  os.Getenv("ANTHROPIC_API_KEY"),
 		AIModel:       os.Getenv("AI_MODEL"),
+		RoutingModel:  os.Getenv("ROUTING_MODEL"),
 		TavilyAPIKey:  os.Getenv("TAVILY_API_KEY"),
 		OCRProvider:   getEnv("OCR_PROVIDER", ""),
 		VAPIDPublicKey:  os.Getenv("VAPID_PUBLIC_KEY"),

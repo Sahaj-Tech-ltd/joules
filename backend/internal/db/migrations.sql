@@ -103,3 +103,56 @@ CREATE TABLE IF NOT EXISTS notification_preferences (
     ntfy_topic TEXT NOT NULL DEFAULT '',
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- v2.5 migrations
+
+-- Foods database (populated via admin import or API fallback)
+CREATE TABLE IF NOT EXISTS foods_db (
+    id BIGSERIAL PRIMARY KEY,
+    barcode TEXT,
+    name TEXT NOT NULL,
+    brand TEXT NOT NULL DEFAULT '',
+    calories INT NOT NULL DEFAULT 0,
+    protein_g NUMERIC(7,2) NOT NULL DEFAULT 0,
+    carbs_g NUMERIC(7,2) NOT NULL DEFAULT 0,
+    fat_g NUMERIC(7,2) NOT NULL DEFAULT 0,
+    fiber_g NUMERIC(7,2) NOT NULL DEFAULT 0,
+    serving_size TEXT NOT NULL DEFAULT '100g',
+    ingredients TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS foods_db_barcode_idx ON foods_db(barcode) WHERE barcode IS NOT NULL AND barcode != '';
+CREATE INDEX IF NOT EXISTS foods_db_name_fts_idx ON foods_db USING GIN (to_tsvector('english', name));
+CREATE INDEX IF NOT EXISTS foods_db_name_trgm_idx ON foods_db(lower(name));
+
+-- User recipes
+CREATE TABLE IF NOT EXISTS recipes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS recipes_user_idx ON recipes(user_id);
+
+CREATE TABLE IF NOT EXISTS recipe_foods (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    recipe_id UUID NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    calories INT NOT NULL DEFAULT 0,
+    protein_g NUMERIC(7,2) NOT NULL DEFAULT 0,
+    carbs_g NUMERIC(7,2) NOT NULL DEFAULT 0,
+    fat_g NUMERIC(7,2) NOT NULL DEFAULT 0,
+    fiber_g NUMERIC(7,2) NOT NULL DEFAULT 0,
+    serving_size TEXT NOT NULL DEFAULT '',
+    sort_order INT NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS recipe_foods_recipe_idx ON recipe_foods(recipe_id);
+
+-- Dietary restrictions on user preferences
+ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS dietary_restrictions TEXT[] NOT NULL DEFAULT '{}';
+
+-- Expand food_items.source to include 'db', 'barcode', 'leftover', 'recipe'
+ALTER TABLE food_items DROP CONSTRAINT IF EXISTS food_items_source_check;
+ALTER TABLE food_items ADD CONSTRAINT food_items_source_check
+    CHECK (source IN ('ai', 'manual', 'leftover', 'db', 'barcode', 'recipe'));

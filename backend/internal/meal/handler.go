@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"joule/internal/ai"
 	"joule/internal/auth"
@@ -22,16 +23,16 @@ import (
 	syslog "joule/internal/syslog"
 )
 
-
 type Handler struct {
 	q         *sqlc.Queries
 	ai        ai.Client
 	uploadDir string
 	cfg       *config.Config
+	pool      *pgxpool.Pool
 }
 
-func NewHandler(q *sqlc.Queries, aiClient ai.Client, uploadDir string, cfg *config.Config) *Handler {
-	return &Handler{q: q, ai: aiClient, uploadDir: uploadDir, cfg: cfg}
+func NewHandler(q *sqlc.Queries, aiClient ai.Client, uploadDir string, cfg *config.Config, pool *pgxpool.Pool) *Handler {
+	return &Handler{q: q, ai: aiClient, uploadDir: uploadDir, cfg: cfg, pool: pool}
 }
 
 type apiResponse struct {
@@ -500,6 +501,105 @@ func (h *Handler) CarryForward(w http.ResponseWriter, r *http.Request) {
 		if req.RemoveFromYesterday && f.OriginalFoodID != "" {
 			h.q.DeleteFoodItem(ctx, f.OriginalFoodID)
 		}
+	}
+
+	writeJSON(w, http.StatusCreated, apiResponse{Data: mealToResponse(meal, createdFoods)})
+}
+
+// LogMealFromRecipe creates a meal from a saved recipe.
+// POST /api/meals/from-recipe/{recipeId}
+// Body: { "meal_type": "lunch" }
+func (h *Handler) LogMealFromRecipe(w http.ResponseWriter, r *http.Request) {
+	recipeID := chi.URLParam(r, "recipeId")
+	userID := getUserID(r)
+	ctx := r.Context()
+
+	var req LogMealFromRecipeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if !validMealTypes[req.MealType] {
+		req.MealType = "snack"
+	}
+
+	// Fetch recipe (no ownership check — recipes are read-public within the app)
+	var recipeName string
+	err := h.pool.QueryRow(ctx,
+		`SELECT name FROM recipes WHERE id = $1`, recipeID,
+	).Scan(&recipeName)
+	if err != nil {
+		writeError(w, http.StatusNotFound, fmt.Errorf("recipe not found"))
+		return
+	}
+
+	// Fetch recipe foods
+	type recipeFood struct {
+		name        string
+		calories    int32
+		proteinG    float64
+		carbsG      float64
+		fatG        float64
+		fiberG      float64
+		servingSize string
+	}
+
+	foodRows, err := h.pool.Query(ctx,
+		`SELECT name, calories, protein_g, carbs_g, fat_g, fiber_g, serving_size
+		 FROM recipe_foods WHERE recipe_id = $1 ORDER BY sort_order ASC, id ASC`,
+		recipeID,
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("fetch recipe foods: %w", err))
+		return
+	}
+	defer foodRows.Close()
+
+	var recipeFoods []recipeFood
+	for foodRows.Next() {
+		var f recipeFood
+		if err := foodRows.Scan(&f.name, &f.calories, &f.proteinG, &f.carbsG, &f.fatG, &f.fiberG, &f.servingSize); err != nil {
+			continue
+		}
+		recipeFoods = append(recipeFoods, f)
+	}
+	if err := foodRows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("scan recipe foods: %w", err))
+		return
+	}
+
+	// Create the meal
+	noteText := fmt.Sprintf("From recipe: %s", recipeName)
+	meal, err := h.q.CreateMeal(ctx, sqlc.CreateMealParams{
+		UserID:    userID,
+		Timestamp: time.Now(),
+		MealType:  req.MealType,
+		Note:      &noteText,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("create meal: %w", err))
+		return
+	}
+
+	// Create food items from recipe
+	var createdFoods []sqlc.FoodItem
+	for _, f := range recipeFoods {
+		fi, err := h.q.CreateFoodItem(ctx, sqlc.CreateFoodItemParams{
+			MealID:      meal.ID,
+			Name:        f.name,
+			Calories:    f.calories,
+			ProteinG:    floatToNumeric(f.proteinG),
+			CarbsG:      floatToNumeric(f.carbsG),
+			FatG:        floatToNumeric(f.fatG),
+			FiberG:      floatToNumeric(f.fiberG),
+			ServingSize: stringPtr(f.servingSize),
+			Source:      "recipe",
+		})
+		if err != nil {
+			slog.Warn("from-recipe: create food item failed", "error", err)
+			continue
+		}
+		createdFoods = append(createdFoods, fi)
 	}
 
 	writeJSON(w, http.StatusCreated, apiResponse{Data: mealToResponse(meal, createdFoods)})

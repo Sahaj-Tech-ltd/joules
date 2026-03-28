@@ -17,6 +17,9 @@ type Config struct {
 	OpenAIBaseURL string
 	AnthropicKey  string
 	Model         string
+	// RoutingModel is a cheaper model used for text-only tasks (OCR parse, nutrition lookup).
+	// Falls back to Model if empty.
+	RoutingModel string
 }
 
 // Tool represents a callable tool the AI can use.
@@ -75,12 +78,12 @@ func NewClient(cfg Config) (Client, error) {
 		if cfg.OpenAIKey == "" {
 			return nil, nil
 		}
-		return newOpenAIClient(cfg.OpenAIKey, cfg.Model, cfg.OpenAIBaseURL), nil
+		return newOpenAIClient(cfg.OpenAIKey, cfg.Model, cfg.RoutingModel, cfg.OpenAIBaseURL), nil
 	case "anthropic":
 		if cfg.AnthropicKey == "" {
 			return nil, nil
 		}
-		return newAnthropicClient(cfg.AnthropicKey, cfg.Model), nil
+		return newAnthropicClient(cfg.AnthropicKey, cfg.Model, cfg.RoutingModel), nil
 	default:
 		return nil, nil
 	}

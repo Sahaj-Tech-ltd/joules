@@ -26,10 +26,12 @@ import (
 	"joule/internal/db/sqlc"
 	"joule/internal/exercise"
 	"joule/internal/export"
+	"joule/internal/foods"
 	"joule/internal/meal"
+	"joule/internal/notify"
+	"joule/internal/recipe"
 	syslog "joule/internal/syslog"
 	"joule/internal/user"
-	"joule/internal/notify"
 	"joule/internal/water"
 	"joule/internal/weight"
 )
@@ -67,8 +69,11 @@ func main() {
 		OpenAIBaseURL: cfg.OpenAIBaseURL,
 		AnthropicKey:  cfg.AnthropicKey,
 		Model:         cfg.AIModel,
+		RoutingModel:  cfg.RoutingModel,
 	})
-	mealHandler := meal.NewHandler(queries, aiClient, cfg.UploadDir, cfg)
+	mealHandler := meal.NewHandler(queries, aiClient, cfg.UploadDir, cfg, pool)
+	foodsHandler := foods.NewHandler(pool)
+	recipeHandler := recipe.NewHandler(pool)
 	dashHandler := dashboard.NewHandler(queries, pool)
 	weightHandler := weight.NewHandler(queries)
 	waterHandler := water.NewHandler(queries)
@@ -102,6 +107,12 @@ func main() {
 		// Public banner endpoint — no auth required
 		r.Get("/banners", adminHandler.GetBanners)
 
+		// Public food search endpoints — no auth required (reference data)
+		r.Route("/foods", func(r chi.Router) {
+			r.Get("/search", foodsHandler.Search)
+			r.Get("/barcode/{upc}", foodsHandler.GetByBarcode)
+		})
+
 		r.Route("/auth", func(r chi.Router) {
 			r.Post("/signup", authHandler.Signup)
 			r.Post("/verify", authHandler.Verify)
@@ -131,6 +142,7 @@ func main() {
 			r.Use(auth.JWTMiddleware(cfg.JWTSecret))
 			r.Use(auth.AdminMiddleware(pool))
 			r.Get("/users", adminHandler.GetUsers)
+			r.Get("/users/{id}/view", adminHandler.GetUserView)
 			r.Post("/users/{id}/approve", adminHandler.ApproveUser)
 			r.Post("/users/{id}/unapprove", adminHandler.UnapproveUser)
 			r.Post("/users/{id}/make-admin", adminHandler.MakeAdmin)
@@ -145,6 +157,7 @@ func main() {
 			r.Post("/banners", adminHandler.CreateBanner)
 			r.Delete("/banners/{id}", adminHandler.DeleteBanner)
 			r.Get("/logs", adminHandler.GetLogs)
+			r.Get("/foods/stats", adminHandler.GetFoodsStats)
 		})
 
 		r.Route("/meals", func(r chi.Router) {
@@ -153,8 +166,16 @@ func main() {
 			r.Get("/", mealHandler.GetMealsByDate)
 			r.Get("/recent", mealHandler.GetRecentMeals)
 			r.Post("/carry-forward", mealHandler.CarryForward)
+			r.Post("/from-recipe/{recipeId}", mealHandler.LogMealFromRecipe)
 			r.Delete("/{id}", mealHandler.DeleteMeal)
 			r.Put("/{mealId}/foods/{foodId}", mealHandler.UpdateFoodItem)
+		})
+
+		r.Route("/recipes", func(r chi.Router) {
+			r.Use(auth.JWTMiddleware(cfg.JWTSecret))
+			r.Get("/", recipeHandler.List)
+			r.Post("/", recipeHandler.Create)
+			r.Delete("/{id}", recipeHandler.Delete)
 		})
 
 		r.Route("/dashboard", func(r chi.Router) {

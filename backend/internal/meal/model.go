@@ -47,3 +47,8 @@ type DailyLogResponse struct {
 	TotalFat      float64        `json:"total_fat"`
 	TotalFiber    float64        `json:"total_fiber"`
 }
+
+// LogMealFromRecipeRequest is the body for POST /api/meals/from-recipe/{recipeId}.
+type LogMealFromRecipeRequest struct {
+	MealType string `json:"meal_type"`
+}

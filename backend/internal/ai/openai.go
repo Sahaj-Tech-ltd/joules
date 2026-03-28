@@ -11,13 +11,14 @@ import (
 )
 
 type OpenAIClient struct {
-	apiKey     string
-	model      string
-	baseURL    string
-	httpClient *http.Client
+	apiKey       string
+	model        string
+	routingModel string // cheaper model for text-only tasks; falls back to model if empty
+	baseURL      string
+	httpClient   *http.Client
 }
 
-func newOpenAIClient(apiKey, model, baseURL string) *OpenAIClient {
+func newOpenAIClient(apiKey, model, routingModel, baseURL string) *OpenAIClient {
 	if model == "" {
 		model = "gpt-4o"
 	}
@@ -25,10 +26,11 @@ func newOpenAIClient(apiKey, model, baseURL string) *OpenAIClient {
 		baseURL = "https://api.openai.com"
 	}
 	return &OpenAIClient{
-		apiKey:     apiKey,
-		model:      model,
-		baseURL:    baseURL,
-		httpClient: &http.Client{},
+		apiKey:       apiKey,
+		model:        model,
+		routingModel: routingModel,
+		baseURL:      baseURL,
+		httpClient:   &http.Client{},
 	}
 }
 
@@ -350,8 +352,12 @@ func (c *OpenAIClient) IdentifyFoodFromText(ocrText, hint string) ([]IdentifiedF
 		userContent += "\n\nUser context: " + hint
 	}
 
+	m := c.model
+	if c.routingModel != "" {
+		m = c.routingModel
+	}
 	reqBody := openaiChatRequest{
-		Model:     c.model,
+		Model:     m,
 		MaxTokens: 1000,
 		Messages: []openaiChatMessage{
 			{Role: "system", Content: openaiOCRParsePrompt},

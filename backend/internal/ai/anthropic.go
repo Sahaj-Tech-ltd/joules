@@ -11,19 +11,21 @@ import (
 )
 
 type AnthropicClient struct {
-	apiKey     string
-	model      string
-	httpClient *http.Client
+	apiKey       string
+	model        string
+	routingModel string // cheaper model for text-only tasks; falls back to model if empty
+	httpClient   *http.Client
 }
 
-func newAnthropicClient(apiKey, model string) *AnthropicClient {
+func newAnthropicClient(apiKey, model, routingModel string) *AnthropicClient {
 	if model == "" {
-		model = "claude-sonnet-4-20250514"
+		model = "claude-sonnet-4-6"
 	}
 	return &AnthropicClient{
-		apiKey:     apiKey,
-		model:      model,
-		httpClient: &http.Client{},
+		apiKey:       apiKey,
+		model:        model,
+		routingModel: routingModel,
+		httpClient:   &http.Client{},
 	}
 }
 
@@ -388,8 +390,12 @@ func (c *AnthropicClient) IdentifyFoodFromText(ocrText, hint string) ([]Identifi
 		userContent += "\n\nUser context: " + hint
 	}
 
+	m := c.model
+	if c.routingModel != "" {
+		m = c.routingModel
+	}
 	reqBody := anthropicRequest{
-		Model:     c.model,
+		Model:     m,
 		MaxTokens: 1000,
 		System:    anthropicOCRParsePrompt,
 		Messages:  []anthropicMessage{{Role: "user", Content: []any{map[string]string{"type": "text", "text": userContent}}}},

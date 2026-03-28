@@ -13,7 +13,40 @@
     fat_g: number;
     fiber_g: number;
     serving_size: string;
-    source: 'ai' | 'manual';
+    source: 'ai' | 'manual' | 'db' | 'barcode' | 'recipe' | 'leftover';
+  }
+
+  interface FoodResult {
+    id?: number;
+    barcode?: string;
+    name: string;
+    brand?: string;
+    calories: number;
+    protein_g: number;
+    carbs_g: number;
+    fat_g: number;
+    fiber_g: number;
+    serving_size: string;
+    ingredients?: string;
+    source: 'local' | 'openfoodfacts';
+  }
+
+  interface RecipeFood {
+    name: string;
+    calories: number;
+    protein_g: number;
+    carbs_g: number;
+    fat_g: number;
+    fiber_g: number;
+    serving_size: string;
+  }
+
+  interface Recipe {
+    id: string;
+    name: string;
+    description: string;
+    foods: RecipeFood[];
+    created_at: string;
   }
 
   interface YesterdayMeal {
@@ -33,6 +66,31 @@
   let error = $state('');
   let showAddFood = $state(false);
   let authenticated = $state(false);
+
+  // Food search
+  let searchQuery = $state('');
+  let searchResults = $state<FoodResult[]>([]);
+  let searchLoading = $state(false);
+  let showSearchDropdown = $state(false);
+  let searchDebounceTimer = $state<ReturnType<typeof setTimeout> | null>(null);
+
+  // Barcode scan modal
+  let showBarcodeModal = $state(false);
+  let barcodeSupported = $state(false);
+  let barcodeLoading = $state(false);
+  let barcodeError = $state('');
+  let barcodeSuccess = $state('');
+  let videoElement = $state<HTMLVideoElement | null>(null);
+  let cameraStream = $state<MediaStream | null>(null);
+  let scanInterval = $state<ReturnType<typeof setInterval> | null>(null);
+
+  // Recipes
+  let recipes = $state<Recipe[]>([]);
+  let recipesLoading = $state(false);
+  let showSaveRecipeModal = $state(false);
+  let recipeName = $state('');
+  let recipeDescription = $state('');
+  let recipeSaving = $state(false);
 
   // Leftovers modal
   let showLeftovers = $state(false);
@@ -65,8 +123,26 @@
       if (!token) goto('/login');
       authenticated = !!token;
     });
+
+    // Check BarcodeDetector support
+    barcodeSupported = 'BarcodeDetector' in window;
+
+    // Load recipes
+    loadRecipes();
+
     return unsub;
   });
+
+  async function loadRecipes() {
+    recipesLoading = true;
+    try {
+      recipes = await api.get<Recipe[]>('/recipes');
+    } catch {
+      recipes = [];
+    } finally {
+      recipesLoading = false;
+    }
+  }
 
   function handleFileSelect(file: File) {
     if (!file.type.startsWith('image/')) return;
@@ -110,8 +186,191 @@
     showAddFood = false;
   }
 
+  function addFoodFromResult(result: FoodResult) {
+    foods = [...foods, {
+      name: result.brand ? `${result.name} (${result.brand})` : result.name,
+      calories: result.calories,
+      protein_g: result.protein_g,
+      carbs_g: result.carbs_g,
+      fat_g: result.fat_g,
+      fiber_g: result.fiber_g,
+      serving_size: result.serving_size,
+      source: 'db'
+    }];
+    searchQuery = '';
+    searchResults = [];
+    showSearchDropdown = false;
+  }
+
   function removeFood(index: number) {
     foods = foods.filter((_, i) => i !== index);
+  }
+
+  function handleSearchInput() {
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    if (!searchQuery.trim()) {
+      searchResults = [];
+      showSearchDropdown = false;
+      return;
+    }
+    searchDebounceTimer = setTimeout(async () => {
+      searchLoading = true;
+      showSearchDropdown = true;
+      try {
+        const results = await api.get<FoodResult[]>(`/foods/search?q=${encodeURIComponent(searchQuery)}&limit=10`);
+        searchResults = results ?? [];
+      } catch {
+        searchResults = [];
+      } finally {
+        searchLoading = false;
+      }
+    }, 300);
+  }
+
+  function closeSearchDropdown() {
+    showSearchDropdown = false;
+  }
+
+  // Barcode scanning
+  async function openBarcodeModal() {
+    showBarcodeModal = true;
+    barcodeError = '';
+    barcodeSuccess = '';
+    if (barcodeSupported) {
+      // Start camera after DOM settles
+      setTimeout(() => startCamera(), 100);
+    }
+  }
+
+  function closeBarcodeModal() {
+    stopCamera();
+    showBarcodeModal = false;
+    barcodeError = '';
+    barcodeSuccess = '';
+    barcodeLoading = false;
+  }
+
+  async function startCamera() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      cameraStream = stream;
+      if (videoElement) {
+        videoElement.srcObject = stream;
+        await videoElement.play();
+        startScanLoop();
+      }
+    } catch {
+      barcodeError = 'Could not access camera. Please allow camera permission or use file upload.';
+    }
+  }
+
+  function stopCamera() {
+    if (scanInterval) {
+      clearInterval(scanInterval);
+      scanInterval = null;
+    }
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(t => t.stop());
+      cameraStream = null;
+    }
+  }
+
+  function startScanLoop() {
+    scanInterval = setInterval(async () => {
+      if (!videoElement || !barcodeSupported || barcodeLoading) return;
+      try {
+        // @ts-ignore BarcodeDetector is not in TS lib yet
+        const detector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'] });
+        const barcodes = await detector.detect(videoElement);
+        if (barcodes.length > 0) {
+          const upc = barcodes[0].rawValue;
+          await lookupBarcode(upc);
+        }
+      } catch {}
+    }, 500);
+  }
+
+  async function lookupBarcode(upc: string) {
+    if (barcodeLoading) return;
+    stopCamera();
+    barcodeLoading = true;
+    barcodeError = '';
+    try {
+      const result = await api.get<FoodResult>(`/foods/barcode/${upc}`);
+      foods = [...foods, {
+        name: result.brand ? `${result.name} (${result.brand})` : result.name,
+        calories: result.calories,
+        protein_g: result.protein_g,
+        carbs_g: result.carbs_g,
+        fat_g: result.fat_g,
+        fiber_g: result.fiber_g,
+        serving_size: result.serving_size,
+        source: 'barcode'
+      }];
+      barcodeSuccess = `Added: ${result.name}`;
+      setTimeout(() => closeBarcodeModal(), 1500);
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('404')) {
+        barcodeError = 'Product not found in database.';
+      } else {
+        barcodeError = 'Failed to look up barcode.';
+      }
+      barcodeLoading = false;
+      // Restart camera for retry
+      if (barcodeSupported) setTimeout(() => startCamera(), 500);
+    }
+  }
+
+  async function handleBarcodeFileUpload(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    barcodeLoading = true;
+    barcodeError = '';
+    try {
+      const bitmap = await createImageBitmap(file);
+      // @ts-ignore
+      const detector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'] });
+      const barcodes = await detector.detect(bitmap);
+      if (barcodes.length === 0) {
+        barcodeError = 'No barcode detected in image.';
+        barcodeLoading = false;
+        return;
+      }
+      await lookupBarcode(barcodes[0].rawValue);
+    } catch {
+      barcodeError = 'Failed to read barcode from image.';
+      barcodeLoading = false;
+    }
+  }
+
+  // Recipes
+  async function logFromRecipe(recipe: Recipe) {
+    try {
+      await api.post(`/meals/from-recipe/${recipe.id}`, { meal_type: mealType });
+      goto('/dashboard');
+    } catch {}
+  }
+
+  function recipeCalories(recipe: Recipe): number {
+    return recipe.foods.reduce((sum, f) => sum + f.calories, 0);
+  }
+
+  async function saveAsRecipe() {
+    if (!recipeName.trim()) return;
+    recipeSaving = true;
+    try {
+      await api.post('/recipes', {
+        name: recipeName.trim(),
+        description: recipeDescription.trim(),
+        foods: foods
+      });
+      showSaveRecipeModal = false;
+      recipeName = '';
+      recipeDescription = '';
+      await loadRecipes();
+    } catch {}
+    finally { recipeSaving = false; }
   }
 
   async function openLeftovers() {
@@ -213,6 +472,7 @@
 
       <div class="grid grid-cols-1 gap-6 xl:grid-cols-3">
         <div class="space-y-6 xl:col-span-2">
+          <!-- Photo Upload -->
           <div class="rounded-xl border border-slate-800 bg-surface-light p-6">
             <h2 class="mb-4 text-sm font-semibold text-white">Photo (Optional)</h2>
             {#if photoPreview}
@@ -269,6 +529,7 @@
             {/if}
           </div>
 
+          <!-- Food Items -->
           <div class="rounded-xl border border-slate-800 bg-surface-light p-6">
             <div class="mb-4 flex items-center justify-between">
               <h2 class="text-sm font-semibold text-white">Food Items</h2>
@@ -286,13 +547,119 @@
                 <button
                   type="button"
                   onclick={() => (showAddFood = !showAddFood)}
-                  class="rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                  class="rounded-lg border border-slate-700 px-3 py-2 text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition"
                 >
-                  + Add Food
+                  + Manual
                 </button>
               </div>
             </div>
 
+            <!-- Food Search -->
+            <div class="mb-4 relative">
+              <div class="flex gap-2">
+                <div class="relative flex-1">
+                  <div class="pointer-events-none absolute inset-y-0 left-3 flex items-center">
+                    {#if searchLoading}
+                      <div class="h-4 w-4 animate-spin rounded-full border-2 border-joule-500 border-t-transparent"></div>
+                    {:else}
+                      <svg class="h-4 w-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                      </svg>
+                    {/if}
+                  </div>
+                  <input
+                    type="text"
+                    bind:value={searchQuery}
+                    oninput={handleSearchInput}
+                    onblur={() => setTimeout(closeSearchDropdown, 150)}
+                    placeholder="Search foods database..."
+                    class="w-full rounded-lg border border-slate-700 bg-surface pl-9 pr-3.5 py-2.5 text-sm text-white placeholder:text-slate-500 focus:border-joule-500 focus:outline-none focus:ring-1 focus:ring-joule-500"
+                  />
+                </div>
+                <!-- Barcode scan button -->
+                <button
+                  type="button"
+                  onclick={openBarcodeModal}
+                  title="Scan barcode"
+                  class="flex items-center justify-center rounded-lg border border-slate-700 px-3 py-2.5 text-slate-400 hover:text-white hover:border-slate-600 hover:bg-slate-800 transition"
+                >
+                  <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M3 5h2M7 5h2M3 7v2M3 15v2M3 19h2M7 19h2M17 5h2M19 5v2M19 15v2M17 19h2M19 19v0M11 5v14M11 5h2M11 19h2M15 7v10" />
+                  </svg>
+                </button>
+              </div>
+
+              <!-- Search dropdown -->
+              {#if showSearchDropdown}
+                <div class="absolute left-0 right-10 top-full z-40 mt-1 rounded-xl border border-slate-700 bg-surface shadow-xl overflow-hidden">
+                  {#if searchLoading}
+                    <div class="flex items-center justify-center py-6">
+                      <div class="h-5 w-5 animate-spin rounded-full border-2 border-joule-500 border-t-transparent"></div>
+                    </div>
+                  {:else if searchResults.length === 0}
+                    <p class="px-4 py-3 text-sm text-slate-500">No results found.</p>
+                  {:else}
+                    <div class="max-h-72 overflow-y-auto">
+                      {#each searchResults as result}
+                        <button
+                          type="button"
+                          onmousedown={() => addFoodFromResult(result)}
+                          class="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-slate-800 transition border-b border-slate-800 last:border-0"
+                        >
+                          <div class="min-w-0 flex-1">
+                            <div class="flex items-center gap-2">
+                              <span class="truncate text-sm font-medium text-white">{result.name}</span>
+                              {#if result.brand}
+                                <span class="shrink-0 text-xs text-slate-500">{result.brand}</span>
+                              {/if}
+                              {#if result.source === 'openfoodfacts'}
+                                <span class="shrink-0 rounded bg-orange-500/10 px-1 py-0.5 text-xs text-orange-400">OFN</span>
+                              {:else}
+                                <span class="shrink-0 rounded bg-blue-500/10 px-1 py-0.5 text-xs text-blue-400">DB</span>
+                              {/if}
+                            </div>
+                            <p class="mt-0.5 text-xs text-slate-500">
+                              {result.protein_g}g P · {result.carbs_g}g C · {result.fat_g}g F
+                              {#if result.serving_size} · {result.serving_size}{/if}
+                            </p>
+                          </div>
+                          <span class="shrink-0 text-sm font-semibold text-white">{result.calories} kcal</span>
+                        </button>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
+              {/if}
+            </div>
+
+            <!-- My Recipes section -->
+            {#if recipes.length > 0 || recipesLoading}
+              <div class="mb-4">
+                <p class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">My Recipes</p>
+                {#if recipesLoading}
+                  <div class="flex items-center gap-2 py-2">
+                    <div class="h-4 w-4 animate-spin rounded-full border-2 border-joule-500 border-t-transparent"></div>
+                    <span class="text-xs text-slate-500">Loading recipes...</span>
+                  </div>
+                {:else}
+                  <div class="flex gap-3 overflow-x-auto pb-2">
+                    {#each recipes as recipe}
+                      <button
+                        type="button"
+                        onclick={() => logFromRecipe(recipe)}
+                        class="flex-none rounded-xl border border-slate-700 bg-surface px-4 py-3 text-left hover:border-joule-500/40 hover:bg-joule-500/5 transition min-w-[140px]"
+                      >
+                        <p class="truncate text-sm font-medium text-white max-w-[130px]">{recipe.name}</p>
+                        <p class="mt-1 text-xs font-semibold text-joule-400">{recipeCalories(recipe)} kcal</p>
+                        <p class="text-xs text-slate-500">{recipe.foods.length} item{recipe.foods.length !== 1 ? 's' : ''}</p>
+                      </button>
+                    {/each}
+                  </div>
+                {/if}
+              </div>
+            {/if}
+
+            <!-- Food list -->
             {#if foods.length > 0}
               <div class="space-y-2">
                 {#each foods as food, i}
@@ -302,6 +669,12 @@
                         <span class="truncate text-sm font-medium text-white">{food.name}</span>
                         {#if food.source === 'ai'}
                           <span class="rounded bg-joule-500/10 px-1.5 py-0.5 text-xs text-joule-400">AI</span>
+                        {:else if food.source === 'db'}
+                          <span class="rounded bg-blue-500/10 px-1.5 py-0.5 text-xs text-blue-400">DB</span>
+                        {:else if food.source === 'barcode'}
+                          <span class="rounded bg-green-500/10 px-1.5 py-0.5 text-xs text-green-400">Scan</span>
+                        {:else if food.source === 'recipe'}
+                          <span class="rounded bg-purple-500/10 px-1.5 py-0.5 text-xs text-purple-400">Recipe</span>
                         {/if}
                       </div>
                       <div class="mt-0.5 text-xs text-slate-500">
@@ -327,10 +700,25 @@
                   </div>
                 {/each}
               </div>
+
+              <!-- Save as Recipe button -->
+              <div class="mt-3 flex justify-end">
+                <button
+                  type="button"
+                  onclick={() => { showSaveRecipeModal = true; }}
+                  class="flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-400 hover:text-purple-400 hover:border-purple-500/40 hover:bg-purple-500/5 transition"
+                >
+                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                  </svg>
+                  Save as Recipe
+                </button>
+              </div>
             {:else}
-              <p class="py-4 text-center text-sm text-slate-500">No foods added yet. Add foods manually or upload a photo.</p>
+              <p class="py-4 text-center text-sm text-slate-500">No foods added yet. Search above, scan a barcode, or upload a photo.</p>
             {/if}
 
+            <!-- Manual add form -->
             {#if showAddFood}
               <div class="mt-4 space-y-3 rounded-lg border border-slate-700 bg-surface p-4">
                 <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -405,6 +793,7 @@
             {/if}
           </div>
 
+          <!-- Meal Details -->
           <div class="rounded-xl border border-slate-800 bg-surface-light p-6">
             <h2 class="mb-4 text-sm font-semibold text-white">Meal Details</h2>
             <div class="space-y-4">
@@ -436,6 +825,7 @@
           </div>
         </div>
 
+        <!-- Sidebar summary -->
         <div class="space-y-6">
           <div class="rounded-xl border border-slate-800 bg-surface-light p-6">
             <h2 class="mb-4 text-sm font-semibold text-white">Summary</h2>
@@ -480,7 +870,6 @@
   {#if showLeftovers}
     <div class="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onclick={(e) => { if (e.target === e.currentTarget) showLeftovers = false; }}>
       <div class="w-full max-w-lg rounded-2xl border border-slate-700 bg-surface shadow-2xl max-h-[80vh] flex flex-col">
-        <!-- Header -->
         <div class="flex items-center justify-between border-b border-slate-800 px-5 py-4">
           <div>
             <h3 class="font-semibold text-white">Yesterday's Leftovers</h3>
@@ -493,7 +882,6 @@
           </button>
         </div>
 
-        <!-- Food list -->
         <div class="flex-1 overflow-y-auto px-5 py-3 space-y-4">
           {#if leftoverLoading}
             <div class="flex items-center justify-center py-10">
@@ -535,7 +923,6 @@
           {/if}
         </div>
 
-        <!-- Footer -->
         {#if !leftoverLoading && leftoverMeals.length > 0}
           <div class="border-t border-slate-800 px-5 py-4 space-y-3">
             <label class="flex items-center gap-3 cursor-pointer">
@@ -565,6 +952,142 @@
             </div>
           </div>
         {/if}
+      </div>
+    </div>
+  {/if}
+
+  <!-- Barcode Scan Modal -->
+  {#if showBarcodeModal}
+    <div role="dialog" aria-modal="true" aria-label="Scan Barcode" class="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onclick={(e) => { if (e.target === e.currentTarget) closeBarcodeModal(); }}>
+      <div class="w-full max-w-md rounded-2xl border border-slate-700 bg-surface shadow-2xl">
+        <div class="flex items-center justify-between border-b border-slate-800 px-5 py-4">
+          <div>
+            <h3 class="font-semibold text-white">Scan Barcode</h3>
+            <p class="mt-0.5 text-xs text-slate-400">
+              {barcodeSupported ? 'Point camera at a barcode' : 'Upload a photo of the barcode'}
+            </p>
+          </div>
+          <button aria-label="Close barcode scanner" onclick={closeBarcodeModal} class="text-slate-500 hover:text-white transition">
+            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div class="p-5">
+          {#if barcodeSuccess}
+            <div class="flex items-center gap-3 rounded-lg border border-green-500/20 bg-green-500/10 px-4 py-3">
+              <svg class="h-5 w-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+              </svg>
+              <p class="text-sm text-green-400">{barcodeSuccess}</p>
+            </div>
+          {:else if barcodeLoading}
+            <div class="flex flex-col items-center gap-3 py-8">
+              <div class="h-8 w-8 animate-spin rounded-full border-2 border-joule-500 border-t-transparent"></div>
+              <p class="text-sm text-slate-400">Looking up product...</p>
+            </div>
+          {:else if barcodeSupported}
+            <!-- Live camera feed -->
+            <div class="relative overflow-hidden rounded-xl bg-black aspect-video">
+              <!-- svelte-ignore a11y_media_has_caption -->
+              <video
+                bind:this={videoElement}
+                autoplay
+                playsinline
+                muted
+                class="h-full w-full object-cover"
+              ></video>
+              <!-- Scan frame overlay -->
+              <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div class="h-32 w-64 rounded-lg border-2 border-joule-500/70 shadow-[0_0_0_9999px_rgba(0,0,0,0.3)]"></div>
+              </div>
+            </div>
+            <p class="mt-3 text-center text-xs text-slate-500">Scanning automatically...</p>
+            {#if barcodeError}
+              <p class="mt-2 text-center text-sm text-red-400">{barcodeError}</p>
+            {/if}
+          {:else}
+            <!-- File upload fallback -->
+            <div class="space-y-4">
+              <p class="text-sm text-slate-400">BarcodeDetector is not supported in this browser. Upload a photo of the barcode instead.</p>
+              <label class="flex cursor-pointer flex-col items-center gap-3 rounded-lg border-2 border-dashed border-slate-700 px-6 py-10 transition hover:border-slate-600">
+                <svg class="h-10 w-10 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                <span class="text-sm text-slate-400">Upload barcode photo</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  class="hidden"
+                  onchange={handleBarcodeFileUpload}
+                />
+              </label>
+              {#if barcodeError}
+                <p class="text-center text-sm text-red-400">{barcodeError}</p>
+              {/if}
+            </div>
+          {/if}
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  <!-- Save as Recipe Modal -->
+  {#if showSaveRecipeModal}
+    <div role="dialog" aria-modal="true" aria-label="Save as Recipe" class="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onclick={(e) => { if (e.target === e.currentTarget) showSaveRecipeModal = false; }}>
+      <div class="w-full max-w-sm rounded-2xl border border-slate-700 bg-surface shadow-2xl">
+        <div class="flex items-center justify-between border-b border-slate-800 px-5 py-4">
+          <div>
+            <h3 class="font-semibold text-white">Save as Recipe</h3>
+            <p class="mt-0.5 text-xs text-slate-400">{foods.length} food item{foods.length !== 1 ? 's' : ''} will be saved</p>
+          </div>
+          <button aria-label="Close save recipe" onclick={() => (showSaveRecipeModal = false)} class="text-slate-500 hover:text-white transition">
+            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div class="space-y-4 p-5">
+          <div>
+            <label for="recipe-name" class="mb-1.5 block text-xs font-medium text-slate-400">Recipe Name</label>
+            <input
+              id="recipe-name"
+              type="text"
+              bind:value={recipeName}
+              placeholder="e.g. Morning oats bowl"
+              class="w-full rounded-lg border border-slate-700 bg-surface-light px-3.5 py-2.5 text-sm text-white placeholder:text-slate-500 focus:border-joule-500 focus:outline-none focus:ring-1 focus:ring-joule-500"
+            />
+          </div>
+          <div>
+            <label for="recipe-description" class="mb-1.5 block text-xs font-medium text-slate-400">Description (Optional)</label>
+            <input
+              id="recipe-description"
+              type="text"
+              bind:value={recipeDescription}
+              placeholder="Brief description..."
+              class="w-full rounded-lg border border-slate-700 bg-surface-light px-3.5 py-2.5 text-sm text-white placeholder:text-slate-500 focus:border-joule-500 focus:outline-none focus:ring-1 focus:ring-joule-500"
+            />
+          </div>
+          <div class="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onclick={() => (showSaveRecipeModal = false)}
+              class="rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onclick={saveAsRecipe}
+              disabled={!recipeName.trim() || recipeSaving}
+              class="rounded-lg bg-joule-500 px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-joule-400 disabled:opacity-50 disabled:cursor-not-allowed transition"
+            >
+              {recipeSaving ? 'Saving...' : 'Save Recipe'}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   {/if}

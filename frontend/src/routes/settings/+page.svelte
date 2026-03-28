@@ -48,6 +48,21 @@
   // Unit preferences
   let unitPrefs = $state<UnitPrefs>({ ...defaultUnits });
 
+  // Dietary restrictions
+  const restrictionOptions = [
+    { value: 'gluten_free', label: 'Gluten Free' },
+    { value: 'dairy_free', label: 'Dairy Free' },
+    { value: 'nut_allergy', label: 'Nut Allergy' },
+    { value: 'vegan', label: 'Vegan' },
+    { value: 'vegetarian', label: 'Vegetarian' },
+    { value: 'halal', label: 'Halal' },
+    { value: 'kosher', label: 'Kosher' },
+    { value: 'low_fodmap', label: 'Low FODMAP' },
+    { value: 'low_sodium', label: 'Low Sodium' },
+    { value: 'diabetic_friendly', label: 'Diabetic Friendly' },
+  ];
+  let selectedRestrictions = $state<string[]>([]);
+
   // Notification preferences
   interface NotifPrefs {
     water_reminders: boolean;
@@ -124,13 +139,14 @@
         const [profile, goals, prefs] = await Promise.all([
           api.get<Profile>('/user/profile'),
           api.get<Goals>('/user/goals'),
-          api.get<UnitPrefs & Record<string, string>>('/user/preferences'),
+          api.get<UnitPrefs & { dietary_restrictions?: string[] } & Record<string, string>>('/user/preferences'),
         ]);
         unitPrefs = {
           height_unit: (prefs.height_unit as UnitPrefs['height_unit']) || 'cm',
           weight_unit: (prefs.weight_unit as UnitPrefs['weight_unit']) || 'kg',
           energy_unit: (prefs.energy_unit as UnitPrefs['energy_unit']) || 'kcal',
         };
+        selectedRestrictions = prefs.dietary_restrictions ?? [];
 
         // Load notification preferences and check subscription status
         try {
@@ -140,7 +156,7 @@
           ]);
           notifPrefs = notifData;
           if (notifData.ntfy_topic && vapidPublicKey) {
-            ntfyURL = `${import.meta.env.VITE_NTFY_BASE_URL || 'https://ntfy.databunker.uk'}/${notifData.ntfy_topic}`;
+            ntfyURL = `${import.meta.env.VITE_NTFY_BASE_URL || 'https://ntfy.sh'}/${notifData.ntfy_topic}`;
           }
           vapidPublicKey = vapidData.public_key;
         } catch {}
@@ -342,12 +358,13 @@
         } : {}),
       });
 
-      // Save unit preferences
+      // Save unit preferences + dietary restrictions
       await api.put('/user/preferences', {
         diet_type: 'omnivore',
         allergies: [],
         food_notes: '',
         eating_context: '',
+        dietary_restrictions: selectedRestrictions,
         ...unitPrefs,
       });
       localStorage.setItem('unit_prefs', JSON.stringify(unitPrefs));
@@ -706,6 +723,37 @@
                 {/each}
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- Dietary Restrictions -->
+        <div class="rounded-xl border border-slate-800 bg-surface-light p-5">
+          <h2 class="mb-1 text-sm font-semibold text-joule-400">Dietary Restrictions</h2>
+          <p class="mb-4 text-xs text-slate-400">Select any dietary restrictions or allergies that apply to you.</p>
+          <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {#each restrictionOptions as opt}
+              {@const checked = selectedRestrictions.includes(opt.value)}
+              <button
+                type="button"
+                onclick={() => {
+                  if (checked) {
+                    selectedRestrictions = selectedRestrictions.filter(r => r !== opt.value);
+                  } else {
+                    selectedRestrictions = [...selectedRestrictions, opt.value];
+                  }
+                }}
+                class="flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left transition {checked ? 'border-joule-500/50 bg-joule-500/10 ring-1 ring-joule-500/20' : 'border-slate-700 hover:border-slate-600'}"
+              >
+                <div class="flex h-4 w-4 shrink-0 items-center justify-center rounded border {checked ? 'border-joule-500 bg-joule-500' : 'border-slate-600'}">
+                  {#if checked}
+                    <svg class="h-3 w-3 text-slate-900" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
+                    </svg>
+                  {/if}
+                </div>
+                <span class="text-sm {checked ? 'text-joule-400 font-medium' : 'text-slate-300'}">{opt.label}</span>
+              </button>
+            {/each}
           </div>
         </div>
 

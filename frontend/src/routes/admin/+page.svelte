@@ -19,7 +19,11 @@
     require_approval: boolean;
     ai_provider: string;
     ai_model: string;
+    routing_model: string;
     smtp_configured: boolean;
+    smtp_host: string;
+    smtp_user: string;
+    smtp_port: string;
     app_url: string;
     port: string;
   }
@@ -29,7 +33,11 @@
     require_approval: false,
     ai_provider: 'openai',
     ai_model: '',
+    routing_model: '',
     smtp_configured: false,
+    smtp_host: '',
+    smtp_user: '',
+    smtp_port: '',
     app_url: '',
     port: '',
   });
@@ -43,6 +51,54 @@
   // Editable AI settings (local state)
   let editAIProvider = $state('openai');
   let editAIModel = $state('');
+  let editRoutingModel = $state('');
+
+  interface ModelOption {
+    value: string;
+    label: string;
+    starred?: boolean;
+    reason?: string; // shown as info tip when selected
+    cost?: string;
+  }
+
+  // ⭐ models appear first. reason shown below the select when that model is active.
+  const aiModels: Record<string, ModelOption[]> = {
+    openai: [
+      { value: 'gpt-4o-mini',   label: 'GPT-4o mini',   starred: true, cost: '$0.15/$0.60/1M',  reason: 'Proven workhorse — very reliable vision and structured output. Best choice for food photo scanning; handles nutrition labels well.' },
+      { value: 'gpt-4.1-mini',  label: 'GPT-4.1 mini',  starred: true, cost: '~$0.40/$1.60/1M', reason: 'Instruction-following beast with 1M context window. Cheapest capable vision in the GPT-4.1 family — great at following JSON output schemas.' },
+      { value: 'gpt-4.1-nano',  label: 'GPT-4.1 nano',  starred: true, cost: '$0.10/$0.40/1M',  reason: 'Dirt cheap. Ideal as routing model for text classification, OCR text parsing, and ingredient matching — fractions of a cent per call.' },
+      { value: 'gpt-5.4-mini',  label: 'GPT-5.4 mini',  starred: true, cost: '~$0.40/$1.60/1M', reason: 'Strong mini in the GPT-5 family with good structured output. Solid for high-volume food scanning at low cost.' },
+      { value: 'gpt-5.4-nano',  label: 'GPT-5.4 nano',  starred: true, cost: '~$0.10/$0.40/1M', reason: 'Cheapest GPT-5.x model. Use for simple text-only tasks — routing, label parsing — where you don\'t need vision.' },
+      { value: 'gpt-5.4',       label: 'GPT-5.4',        cost: '$2.50/$15.00/1M' },
+      { value: 'gpt-5.4-pro',   label: 'GPT-5.4 pro',    cost: '~$10.50/$84.00/1M' },
+      { value: 'gpt-4.1',       label: 'GPT-4.1',        cost: '$2.00/$8.00/1M' },
+      { value: 'gpt-4o',        label: 'GPT-4o',         cost: '$2.50/$10.00/1M' },
+      { value: 'o4-mini',       label: 'o4-mini',        cost: '~$1.10/$4.40/1M' },
+      { value: 'o3',            label: 'o3',             cost: '$2.00/$8.00/1M' },
+    ],
+    anthropic: [
+      { value: 'claude-haiku-4-5-20251001',  label: 'Claude Haiku 4.5', starred: true, cost: '$1.00/$5.00/1M',  reason: 'Fast, cheap, solid quality — best bang-for-buck in the Anthropic lineup for food tracking and label scanning.' },
+      { value: 'claude-3-haiku-20240307',    label: 'Claude Haiku 3',   starred: true, cost: '$0.25/$1.25/1M',  reason: 'Cheapest Anthropic model available. Ideal as routing model for text-only classification and ingredient matching.' },
+      { value: 'claude-opus-4-6',            label: 'Claude Opus 4.6',   cost: '$5.00/$25.00/1M' },
+      { value: 'claude-sonnet-4-6',          label: 'Claude Sonnet 4.6', cost: '$3.00/$15.00/1M' },
+      { value: 'claude-sonnet-4-5',          label: 'Claude Sonnet 4.5', cost: '$3.00/$15.00/1M' },
+      { value: 'claude-opus-4-5',            label: 'Claude Opus 4.5',   cost: '$5.00/$25.00/1M' },
+      { value: 'claude-sonnet-4',            label: 'Claude Sonnet 4',   cost: '$3.00/$15.00/1M' },
+    ],
+  };
+
+  function modelInfo(provider: string, modelValue: string): ModelOption | undefined {
+    return (aiModels[provider] ?? []).find(m => m.value === modelValue);
+  }
+
+  // SMTP settings
+  let editSMTPHost = $state('');
+  let editSMTPPort = $state('');
+  let editSMTPUser = $state('');
+  let editSMTPPass = $state('');
+  let smtpSaving = $state(false);
+  let smtpSaved = $state(false);
+  let showSMTPForm = $state(false);
 
   // Restart modal
   let showRestartModal = $state(false);
@@ -78,6 +134,10 @@
         settings = settingsData;
         editAIProvider = settingsData.ai_provider || 'openai';
         editAIModel = settingsData.ai_model || '';
+        editRoutingModel = settingsData.routing_model || '';
+        editSMTPHost = settingsData.smtp_host || '';
+        editSMTPPort = settingsData.smtp_port || '';
+        editSMTPUser = settingsData.smtp_user || '';
         banners = bannersData ?? [];
       } catch {
         goto('/dashboard');
@@ -155,20 +215,42 @@
         require_approval: settings.require_approval,
         ai_provider: editAIProvider,
         ai_model: editAIModel,
+        routing_model: editRoutingModel,
       });
-      settings = { ...settings, ai_provider: editAIProvider, ai_model: editAIModel };
+      settings = { ...settings, ai_provider: editAIProvider, ai_model: editAIModel, routing_model: editRoutingModel };
       aiSaved = true;
       setTimeout(() => { aiSaved = false; }, 3000);
     } catch {}
     finally { aiSaving = false; }
   }
 
+  async function saveSMTPSettings() {
+    smtpSaving = true;
+    smtpSaved = false;
+    try {
+      await api.put('/admin/settings', {
+        require_approval: settings.require_approval,
+        smtp_host: editSMTPHost,
+        smtp_port: editSMTPPort,
+        smtp_user: editSMTPUser,
+        ...(editSMTPPass ? { smtp_pass: editSMTPPass } : {}),
+      });
+      settings = { ...settings, smtp_host: editSMTPHost, smtp_user: editSMTPUser, smtp_port: editSMTPPort, smtp_configured: !!editSMTPHost };
+      editSMTPPass = '';
+      smtpSaved = true;
+      showSMTPForm = false;
+      setTimeout(() => { smtpSaved = false; }, 3000);
+    } catch {}
+    finally { smtpSaving = false; }
+  }
+
   // --- Banners ---
-  interface Banner { id: string; title: string; message: string; type: string; created_at: string; }
+  interface Banner { id: string; title: string; message: string; type: string; expires_at?: string; created_at: string; }
   let banners = $state<Banner[]>([]);
   let newBannerTitle = $state('');
   let newBannerMsg = $state('');
   let newBannerType = $state('info');
+  let newBannerExpiry = $state(''); // duration in hours, empty = never
   let bannerSaving = $state(false);
 
   // --- Logs ---
@@ -199,9 +281,21 @@
     if (!newBannerMsg.trim()) return;
     bannerSaving = true;
     try {
-      const b = await api.post<Banner>('/admin/banners', { title: newBannerTitle, message: newBannerMsg, type: newBannerType });
+      let expiresAt: string | undefined;
+      if (newBannerExpiry) {
+        const hrs = parseFloat(newBannerExpiry);
+        if (!isNaN(hrs) && hrs > 0) {
+          expiresAt = new Date(Date.now() + hrs * 3600 * 1000).toISOString();
+        }
+      }
+      const b = await api.post<Banner>('/admin/banners', {
+        title: newBannerTitle,
+        message: newBannerMsg,
+        type: newBannerType,
+        ...(expiresAt ? { expires_at: expiresAt } : {}),
+      });
       banners = [b, ...banners];
-      newBannerTitle = ''; newBannerMsg = ''; newBannerType = 'info';
+      newBannerTitle = ''; newBannerMsg = ''; newBannerType = 'info'; newBannerExpiry = '';
     } catch {}
     finally { bannerSaving = false; }
   }
@@ -326,27 +420,68 @@
             Restart required to apply
           </span>
         </div>
+        <!-- Provider -->
+        <div class="mb-4">
+          <label for="ai-provider" class="mb-1.5 block text-xs font-medium text-slate-400">Provider</label>
+          <select
+            id="ai-provider"
+            bind:value={editAIProvider}
+            onchange={() => { editAIModel = ''; editRoutingModel = ''; }}
+            class="w-full rounded-lg border border-slate-700 bg-surface px-3 py-2 text-sm text-white focus:border-joule-500 focus:outline-none focus:ring-1 focus:ring-joule-500 sm:w-48"
+          >
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic</option>
+          </select>
+        </div>
+
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 mb-4">
+          <!-- Primary model -->
           <div>
-            <label for="ai-provider" class="mb-1.5 block text-xs font-medium text-slate-400">Provider</label>
+            <label for="ai-model" class="mb-1.5 block text-xs font-medium text-slate-400">
+              Primary Model
+              <span class="ml-1 text-slate-600">— vision, chat, tips</span>
+            </label>
             <select
-              id="ai-provider"
-              bind:value={editAIProvider}
+              id="ai-model"
+              bind:value={editAIModel}
               class="w-full rounded-lg border border-slate-700 bg-surface px-3 py-2 text-sm text-white focus:border-joule-500 focus:outline-none focus:ring-1 focus:ring-joule-500"
             >
-              <option value="openai">OpenAI</option>
-              <option value="anthropic">Anthropic</option>
+              {#each (aiModels[editAIProvider] ?? []) as m}
+                <option value={m.value}>{m.starred ? '⭐ ' : ''}{m.label}{m.cost ? '  ·  ' + m.cost : ''}</option>
+              {/each}
             </select>
+            {#if modelInfo(editAIProvider, editAIModel)?.reason}
+              <p class="mt-1.5 flex items-start gap-1 text-xs text-slate-500">
+                <span class="shrink-0 text-joule-400">ⓘ</span>
+                {modelInfo(editAIProvider, editAIModel)?.reason}
+              </p>
+            {/if}
           </div>
+
+          <!-- Routing model -->
           <div>
-            <label for="ai-model" class="mb-1.5 block text-xs font-medium text-slate-400">Model</label>
-            <input
-              id="ai-model"
-              type="text"
-              bind:value={editAIModel}
-              placeholder={editAIProvider === 'openai' ? 'gpt-4o' : 'claude-opus-4-6'}
-              class="w-full rounded-lg border border-slate-700 bg-surface px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-joule-500 focus:outline-none focus:ring-1 focus:ring-joule-500"
-            />
+            <label for="routing-model" class="mb-1.5 block text-xs font-medium text-slate-400">
+              Routing Model
+              <span class="ml-1 text-slate-600">— OCR parse, nutrition lookup</span>
+            </label>
+            <select
+              id="routing-model"
+              bind:value={editRoutingModel}
+              class="w-full rounded-lg border border-slate-700 bg-surface px-3 py-2 text-sm text-white focus:border-joule-500 focus:outline-none focus:ring-1 focus:ring-joule-500"
+            >
+              <option value="">Same as primary</option>
+              {#each (aiModels[editAIProvider] ?? []) as m}
+                <option value={m.value}>{m.starred ? '⭐ ' : ''}{m.label}{m.cost ? '  ·  ' + m.cost : ''}</option>
+              {/each}
+            </select>
+            {#if editRoutingModel && modelInfo(editAIProvider, editRoutingModel)?.reason}
+              <p class="mt-1.5 flex items-start gap-1 text-xs text-slate-500">
+                <span class="shrink-0 text-joule-400">ⓘ</span>
+                {modelInfo(editAIProvider, editRoutingModel)?.reason}
+              </p>
+            {:else if !editRoutingModel}
+              <p class="mt-1.5 text-xs text-slate-600">Pick a cheap model here to save cost on text-only tasks.</p>
+            {/if}
           </div>
         </div>
         <div class="flex items-center gap-3">
@@ -361,6 +496,66 @@
             {aiSaving ? 'Saving…' : 'Save AI Settings'}
           </button>
         </div>
+      </div>
+
+      <!-- SMTP Settings -->
+      <div class="mb-6 rounded-xl border border-slate-700 bg-surface-light p-5">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-sm font-semibold text-joule-400">SMTP / Email</h2>
+          <div class="flex items-center gap-2">
+            {#if smtpSaved}
+              <span class="text-sm text-green-400">Saved!</span>
+            {/if}
+            <button
+              onclick={() => { showSMTPForm = !showSMTPForm; }}
+              class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition"
+            >{showSMTPForm ? 'Cancel' : 'Edit'}</button>
+          </div>
+        </div>
+        {#if !showSMTPForm}
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div>
+              <p class="text-xs text-slate-500 mb-0.5">Host</p>
+              <p class="text-sm text-white font-mono">{settings.smtp_host || '—'}</p>
+            </div>
+            <div>
+              <p class="text-xs text-slate-500 mb-0.5">Port</p>
+              <p class="text-sm text-white font-mono">{settings.smtp_port || '—'}</p>
+            </div>
+            <div>
+              <p class="text-xs text-slate-500 mb-0.5">User</p>
+              <p class="text-sm text-white font-mono">{settings.smtp_user || '—'}</p>
+            </div>
+          </div>
+        {:else}
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 mb-3">
+            <div>
+              <label class="mb-1.5 block text-xs font-medium text-slate-400">Host</label>
+              <input type="text" bind:value={editSMTPHost} placeholder="mail.example.com"
+                class="w-full rounded-lg border border-slate-700 bg-surface px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-joule-500 focus:outline-none" />
+            </div>
+            <div>
+              <label class="mb-1.5 block text-xs font-medium text-slate-400">Port</label>
+              <input type="text" bind:value={editSMTPPort} placeholder="465 or 587"
+                class="w-full rounded-lg border border-slate-700 bg-surface px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-joule-500 focus:outline-none" />
+            </div>
+            <div>
+              <label class="mb-1.5 block text-xs font-medium text-slate-400">Username</label>
+              <input type="text" bind:value={editSMTPUser} placeholder="hello@example.com"
+                class="w-full rounded-lg border border-slate-700 bg-surface px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-joule-500 focus:outline-none" />
+            </div>
+            <div>
+              <label class="mb-1.5 block text-xs font-medium text-slate-400">Password <span class="text-slate-500">(leave blank to keep current)</span></label>
+              <input type="password" bind:value={editSMTPPass} placeholder="••••••••"
+                class="w-full rounded-lg border border-slate-700 bg-surface px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-joule-500 focus:outline-none" />
+            </div>
+          </div>
+          <button
+            onclick={saveSMTPSettings}
+            disabled={smtpSaving}
+            class="rounded-lg bg-joule-500 px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-joule-400 transition disabled:opacity-50"
+          >{smtpSaving ? 'Saving…' : 'Save SMTP'}</button>
+        {/if}
       </div>
 
       <!-- Restart Server -->
@@ -431,6 +626,10 @@
                   <td class="px-5 py-3">
                     {#if user.id !== currentUserID}
                       <div class="flex flex-wrap items-center gap-1.5">
+                        <a
+                          href="/admin/users/{user.id}"
+                          class="rounded px-2 py-1 text-xs font-medium text-slate-300 hover:bg-slate-700 transition"
+                        >View</a>
                         {#if !user.is_admin}
                           {#if !user.verified}
                             <button
@@ -500,7 +699,7 @@
             rows="2"
             class="w-full rounded-lg border border-slate-700 bg-surface-light px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-joule-500 focus:outline-none focus:ring-1 focus:ring-joule-500 resize-none"
           ></textarea>
-          <div class="flex items-center gap-3">
+          <div class="flex flex-wrap items-center gap-3">
             <select
               bind:value={newBannerType}
               class="rounded-lg border border-slate-700 bg-surface-light px-3 py-2 text-sm text-white focus:border-joule-500 focus:outline-none"
@@ -508,6 +707,17 @@
               <option value="info">Info</option>
               <option value="tip">Tip</option>
               <option value="warning">Warning</option>
+            </select>
+            <select
+              bind:value={newBannerExpiry}
+              class="rounded-lg border border-slate-700 bg-surface-light px-3 py-2 text-sm text-white focus:border-joule-500 focus:outline-none"
+            >
+              <option value="">No expiry</option>
+              <option value="1">1 hour</option>
+              <option value="6">6 hours</option>
+              <option value="24">1 day</option>
+              <option value="72">3 days</option>
+              <option value="168">7 days</option>
             </select>
             <button
               onclick={createBanner}
@@ -527,7 +737,10 @@
                 <div class="min-w-0">
                   {#if banner.title}<p class="text-sm font-medium text-white">{banner.title}</p>{/if}
                   <p class="text-sm text-slate-400">{banner.message}</p>
-                  <p class="mt-0.5 text-xs text-slate-600 capitalize">{banner.type} · {formatDate(banner.created_at)}</p>
+                  <p class="mt-0.5 text-xs text-slate-600 capitalize">
+                    {banner.type} · {formatDate(banner.created_at)}
+                    {#if banner.expires_at} · expires {formatDate(banner.expires_at)}{/if}
+                  </p>
                 </div>
                 <button
                   onclick={() => deleteBanner(banner.id)}

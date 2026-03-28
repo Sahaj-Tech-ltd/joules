@@ -30,6 +30,8 @@ export interface UserProfile {
   target_weight_kg: number | null;
   activity_level: string | null;
   onboarding_complete: boolean;
+  is_admin: boolean;
+  avatar_url: string | null;
 }
 
 export interface UserGoals {
@@ -75,7 +77,9 @@ export const userProfile = createPersistedStore<UserProfile>('user_profile', {
   weight_kg: null,
   target_weight_kg: null,
   activity_level: null,
-  onboarding_complete: false
+  onboarding_complete: false,
+  is_admin: false,
+  avatar_url: null,
 });
 
 export const userGoals = createPersistedStore<UserGoals>('user_goals', {
