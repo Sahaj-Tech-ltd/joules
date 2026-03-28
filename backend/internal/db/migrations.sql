@@ -77,3 +77,29 @@ CREATE TABLE IF NOT EXISTS nutrition_cache (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS nutrition_cache_query_idx ON nutrition_cache (lower(query));
+
+-- Push notification subscriptions (Web Push VAPID)
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    endpoint TEXT NOT NULL UNIQUE,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    user_agent TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS push_subscriptions_user_idx ON push_subscriptions(user_id);
+
+-- Notification preferences per user
+CREATE TABLE IF NOT EXISTS notification_preferences (
+    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    water_reminders BOOLEAN NOT NULL DEFAULT TRUE,
+    water_interval_hours INT NOT NULL DEFAULT 2,
+    meal_reminders BOOLEAN NOT NULL DEFAULT TRUE,
+    if_window_reminders BOOLEAN NOT NULL DEFAULT TRUE,
+    streak_reminders BOOLEAN NOT NULL DEFAULT TRUE,
+    quiet_start INT NOT NULL DEFAULT 22,
+    quiet_end INT NOT NULL DEFAULT 8,
+    ntfy_topic TEXT NOT NULL DEFAULT '',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

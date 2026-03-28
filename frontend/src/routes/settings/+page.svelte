@@ -48,6 +48,35 @@
   // Unit preferences
   let unitPrefs = $state<UnitPrefs>({ ...defaultUnits });
 
+  // Notification preferences
+  interface NotifPrefs {
+    water_reminders: boolean;
+    water_interval_hours: number;
+    meal_reminders: boolean;
+    if_window_reminders: boolean;
+    streak_reminders: boolean;
+    quiet_start: number;
+    quiet_end: number;
+    ntfy_topic: string;
+  }
+  let notifPrefs = $state<NotifPrefs>({
+    water_reminders: true,
+    water_interval_hours: 2,
+    meal_reminders: true,
+    if_window_reminders: true,
+    streak_reminders: true,
+    quiet_start: 22,
+    quiet_end: 8,
+    ntfy_topic: '',
+  });
+  let notifSupported = $state(typeof window !== 'undefined' && 'Notification' in window && 'serviceWorker' in navigator);
+  let notifPermission = $state<NotificationPermission>('default');
+  let notifSubscribed = $state(false);
+  let notifSaving = $state(false);
+  let notifSaved = $state(false);
+  let notifTesting = $state(false);
+  let vapidPublicKey = $state('');
+
   let objective = $state('maintain');
   let dietPlan = $state('balanced');
   let fastingWindow = $state('');
@@ -101,6 +130,25 @@
           weight_unit: (prefs.weight_unit as UnitPrefs['weight_unit']) || 'kg',
           energy_unit: (prefs.energy_unit as UnitPrefs['energy_unit']) || 'kcal',
         };
+
+        // Load notification preferences and check subscription status
+        try {
+          const [notifData, vapidData] = await Promise.all([
+            api.get<NotifPrefs>('/notifications/preferences'),
+            api.get<{public_key: string}>('/notifications/vapid-public-key'),
+          ]);
+          notifPrefs = notifData;
+          vapidPublicKey = vapidData.public_key;
+        } catch {}
+
+        if ('Notification' in window) {
+          notifPermission = Notification.permission;
+        }
+        if ('serviceWorker' in navigator && vapidPublicKey) {
+          const reg = await navigator.serviceWorker.ready;
+          const sub = await reg.pushManager.getSubscription();
+          notifSubscribed = !!sub;
+        }
         isAdmin = profile.is_admin;
         fullProfile = profile;
         profileName = profile.name;
@@ -194,6 +242,61 @@
       profileSaving = false;
       avatarUploading = false;
     }
+  }
+
+  async function enableNotifications() {
+    if (!notifSupported || !vapidPublicKey) return;
+    const permission = await Notification.requestPermission();
+    notifPermission = permission;
+    if (permission !== 'granted') return;
+
+    const reg = await navigator.serviceWorker.ready;
+
+    // Convert VAPID key from base64url to Uint8Array
+    const keyStr = vapidPublicKey.replace(/-/g, '+').replace(/_/g, '/');
+    const rawKey = Uint8Array.from(atob(keyStr), c => c.charCodeAt(0));
+
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: rawKey,
+    });
+
+    const json = sub.toJSON();
+    await api.post('/notifications/subscribe', {
+      endpoint: json.endpoint,
+      p256dh: (json.keys as Record<string, string>).p256dh,
+      auth: (json.keys as Record<string, string>).auth,
+      user_agent: navigator.userAgent,
+    });
+
+    notifSubscribed = true;
+  }
+
+  async function disableNotifications() {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) {
+      await api.post('/notifications/unsubscribe', { endpoint: sub.endpoint });
+      await sub.unsubscribe();
+    }
+    notifSubscribed = false;
+  }
+
+  async function saveNotifPrefs() {
+    notifSaving = true;
+    notifSaved = false;
+    try {
+      await api.put('/notifications/preferences', notifPrefs);
+      notifSaved = true;
+      setTimeout(() => { notifSaved = false; }, 3000);
+    } catch {}
+    finally { notifSaving = false; }
+  }
+
+  async function sendTestNotification() {
+    notifTesting = true;
+    try { await api.post('/notifications/test', {}); } catch {}
+    finally { setTimeout(() => { notifTesting = false; }, 2000); }
   }
 
   async function save() {
@@ -598,6 +701,104 @@
               </div>
             </div>
           </div>
+        </div>
+
+        <!-- Notifications -->
+        <div class="rounded-2xl border border-slate-800 bg-slate-900/50 p-6">
+          <h2 class="mb-5 text-base font-semibold text-white">Notifications</h2>
+
+          {#if !notifSupported}
+            <p class="text-sm text-slate-500">Push notifications are not supported in this browser.</p>
+          {:else}
+            <!-- Enable / disable toggle -->
+            <div class="mb-5 flex items-center justify-between">
+              <div>
+                <p class="text-sm font-medium text-slate-200">Browser push notifications</p>
+                <p class="text-xs text-slate-500 mt-0.5">Works when the app is open or backgrounded</p>
+              </div>
+              {#if notifSubscribed}
+                <button onclick={disableNotifications} class="rounded-lg bg-slate-700 px-4 py-1.5 text-xs font-semibold text-slate-300 hover:bg-slate-600 transition">
+                  Disable
+                </button>
+              {:else}
+                <button onclick={enableNotifications} disabled={notifPermission === 'denied'} class="rounded-lg bg-joule-500 px-4 py-1.5 text-xs font-semibold text-slate-900 hover:bg-joule-400 transition disabled:opacity-40">
+                  {notifPermission === 'denied' ? 'Blocked in browser' : 'Enable'}
+                </button>
+              {/if}
+            </div>
+
+            {#if notifSubscribed}
+              <!-- Reminder toggles -->
+              <div class="space-y-3 mb-5">
+                <label class="flex items-center justify-between">
+                  <span class="text-sm text-slate-300">💧 Water reminders</span>
+                  <input type="checkbox" bind:checked={notifPrefs.water_reminders} class="accent-joule-500 h-4 w-4" />
+                </label>
+                {#if notifPrefs.water_reminders}
+                  <div class="ml-4 flex items-center gap-2">
+                    <span class="text-xs text-slate-500">Every</span>
+                    <select bind:value={notifPrefs.water_interval_hours} class="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 text-xs text-white">
+                      {#each [1,2,3,4] as h}<option value={h}>{h}h</option>{/each}
+                    </select>
+                  </div>
+                {/if}
+                <label class="flex items-center justify-between">
+                  <span class="text-sm text-slate-300">🍽️ Meal logging reminders</span>
+                  <input type="checkbox" bind:checked={notifPrefs.meal_reminders} class="accent-joule-500 h-4 w-4" />
+                </label>
+                <label class="flex items-center justify-between">
+                  <span class="text-sm text-slate-300">⏰ Intermittent fasting window alerts</span>
+                  <input type="checkbox" bind:checked={notifPrefs.if_window_reminders} class="accent-joule-500 h-4 w-4" />
+                </label>
+                <label class="flex items-center justify-between">
+                  <span class="text-sm text-slate-300">🔥 Streak at-risk reminder</span>
+                  <input type="checkbox" bind:checked={notifPrefs.streak_reminders} class="accent-joule-500 h-4 w-4" />
+                </label>
+              </div>
+
+              <!-- Quiet hours -->
+              <div class="mb-5">
+                <p class="mb-2 text-xs font-medium text-slate-400">Quiet hours (no notifications)</p>
+                <div class="flex items-center gap-3">
+                  <select bind:value={notifPrefs.quiet_start} class="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm text-white">
+                    {#each Array.from({length:24},(_,i)=>i) as h}
+                      <option value={h}>{String(h).padStart(2,'0')}:00</option>
+                    {/each}
+                  </select>
+                  <span class="text-xs text-slate-500">to</span>
+                  <select bind:value={notifPrefs.quiet_end} class="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm text-white">
+                    {#each Array.from({length:24},(_,i)=>i) as h}
+                      <option value={h}>{String(h).padStart(2,'0')}:00</option>
+                    {/each}
+                  </select>
+                </div>
+              </div>
+
+              <!-- ntfy topic -->
+              <div class="mb-5">
+                <label class="block mb-1 text-xs font-medium text-slate-400" for="ntfy-topic">
+                  ntfy topic (optional — for reliable delivery when browser is fully closed)
+                </label>
+                <input id="ntfy-topic" type="text" bind:value={notifPrefs.ntfy_topic}
+                  placeholder="e.g. joules-harsh-abc123"
+                  class="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:border-joule-500 focus:outline-none" />
+                <p class="mt-1.5 text-xs text-slate-500">
+                  Set up ntfy at <span class="text-slate-400">ntfy.databunker.uk</span>, subscribe to a topic, then enter it here.
+                  You'll need the <a href="https://ntfy.sh" target="_blank" class="text-joule-400 underline">ntfy app</a> on your phone.
+                </p>
+              </div>
+
+              <!-- Save + test -->
+              <div class="flex items-center gap-3">
+                <button onclick={saveNotifPrefs} disabled={notifSaving} class="rounded-xl bg-joule-500 px-5 py-2 text-sm font-semibold text-slate-900 hover:bg-joule-400 transition disabled:opacity-50">
+                  {notifSaving ? 'Saving…' : notifSaved ? '✓ Saved' : 'Save notification settings'}
+                </button>
+                <button onclick={sendTestNotification} disabled={notifTesting} class="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-400 hover:border-slate-500 transition disabled:opacity-50">
+                  {notifTesting ? 'Sent!' : 'Send test'}
+                </button>
+              </div>
+            {/if}
+          {/if}
         </div>
 
         <!-- Save -->

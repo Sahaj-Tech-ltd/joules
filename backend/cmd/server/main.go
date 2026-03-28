@@ -29,6 +29,7 @@ import (
 	"joule/internal/meal"
 	syslog "joule/internal/syslog"
 	"joule/internal/user"
+	"joule/internal/notify"
 	"joule/internal/water"
 	"joule/internal/weight"
 )
@@ -76,6 +77,13 @@ func main() {
 	achievementHandler := achievement.NewHandler(queries)
 	exportHandler := export.NewHandler(queries)
 	adminHandler := admin.NewHandler(pool, cfg.RequireApproval, cfg)
+	notifySvc := notify.NewService(queries, pool, cfg)
+	notifyHandler := notify.NewHandler(queries, notifySvc, cfg)
+
+	// Start notification scheduler in background
+	schedCtx, schedCancel := context.WithCancel(context.Background())
+	_ = schedCancel // cancelled on server shutdown via defer
+	go notifySvc.StartScheduler(schedCtx)
 
 	r := chi.NewRouter()
 
@@ -188,6 +196,20 @@ func main() {
 		r.Route("/export", func(r chi.Router) {
 			r.Use(auth.JWTMiddleware(cfg.JWTSecret))
 			r.Get("/csv", exportHandler.ExportCSV)
+		})
+
+		r.Route("/notifications", func(r chi.Router) {
+			// VAPID public key is public (needed before subscription)
+			r.Get("/vapid-public-key", notifyHandler.GetVAPIDPublicKey)
+			// All other routes require auth
+			r.Group(func(r chi.Router) {
+				r.Use(auth.JWTMiddleware(cfg.JWTSecret))
+				r.Post("/subscribe", notifyHandler.Subscribe)
+				r.Post("/unsubscribe", notifyHandler.Unsubscribe)
+				r.Get("/preferences", notifyHandler.GetPreferences)
+				r.Put("/preferences", notifyHandler.SavePreferences)
+				r.Post("/test", notifyHandler.SendTest)
+			})
 		})
 	})
 

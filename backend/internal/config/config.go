@@ -19,6 +19,10 @@ type Config struct {
 	AIModel        string
 	TavilyAPIKey   string
 	OCRProvider    string
+	VAPIDPublicKey  string
+	VAPIDPrivateKey string
+	VAPIDContact   string
+	NtfyBaseURL     string
 	SMTPHost     string
 	SMTPPort     int
 	SMTPUser     string
@@ -42,6 +46,10 @@ func Load() (*Config, error) {
 		AIModel:       os.Getenv("AI_MODEL"),
 		TavilyAPIKey:  os.Getenv("TAVILY_API_KEY"),
 		OCRProvider:   getEnv("OCR_PROVIDER", ""),
+		VAPIDPublicKey:  os.Getenv("VAPID_PUBLIC_KEY"),
+		VAPIDPrivateKey: os.Getenv("VAPID_PRIVATE_KEY"),
+		VAPIDContact:   getEnv("VAPID_CONTACT", "mailto:admin@example.com"),
+		NtfyBaseURL:     os.Getenv("NTFY_BASE_URL"),
 		SMTPHost:    os.Getenv("SMTP_HOST"),
 		SMTPUser:    os.Getenv("SMTP_USER"),
 		SMTPPass:    os.Getenv("SMTP_PASS"),
