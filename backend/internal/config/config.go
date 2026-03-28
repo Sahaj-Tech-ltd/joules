@@ -23,6 +23,7 @@ type Config struct {
 	VAPIDPrivateKey string
 	VAPIDContact   string
 	NtfyBaseURL     string
+	NtfyToken       string
 	SMTPHost     string
 	SMTPPort     int
 	SMTPUser     string
@@ -50,6 +51,7 @@ func Load() (*Config, error) {
 		VAPIDPrivateKey: os.Getenv("VAPID_PRIVATE_KEY"),
 		VAPIDContact:   getEnv("VAPID_CONTACT", "mailto:admin@example.com"),
 		NtfyBaseURL:     os.Getenv("NTFY_BASE_URL"),
+		NtfyToken:       os.Getenv("NTFY_TOKEN"),
 		SMTPHost:    os.Getenv("SMTP_HOST"),
 		SMTPUser:    os.Getenv("SMTP_USER"),
 		SMTPPass:    os.Getenv("SMTP_PASS"),

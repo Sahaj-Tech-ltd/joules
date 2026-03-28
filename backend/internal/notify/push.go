@@ -116,6 +116,9 @@ func (s *Service) sendNtfy(topic string, p Payload) {
 	}
 	req.Header.Set("Title", p.Title)
 	req.Header.Set("Content-Type", "text/plain")
+	if s.cfg.NtfyToken != "" {
+		req.Header.Set("Authorization", "Bearer "+s.cfg.NtfyToken)
+	}
 	if p.URL != "" {
 		req.Header.Set("Click", p.URL)
 	}

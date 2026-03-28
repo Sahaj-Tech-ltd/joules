@@ -6,7 +6,9 @@ import (
 	"log/slog"
 	"net/http"
 
+	"fmt"
 	"joule/internal/auth"
+	"github.com/google/uuid"
 	"joule/internal/config"
 	"joule/internal/db/sqlc"
 )
@@ -67,8 +69,9 @@ func (h *Handler) Subscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	uid := userID(r)
 	if err := h.q.SavePushSubscription(r.Context(), sqlc.SavePushSubscriptionParams{
-		UserID:    userID(r),
+		UserID:    uid,
 		Endpoint:  req.Endpoint,
 		P256dh:    req.P256dh,
 		Auth:      req.Auth,
@@ -78,7 +81,37 @@ func (h *Handler) Subscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, apiResponse{Data: map[string]string{"status": "subscribed"}})
+	// Auto-generate a personal ntfy topic for this user if they don't have one yet.
+	// This means zero manual setup — just tap "Subscribe in ntfy app" on the frontend.
+	ntfyTopic := ""
+	prefs, err := h.q.GetNotificationPrefs(r.Context(), uid)
+	if err != nil || prefs.NtfyTopic == "" {
+		ntfyTopic = "joules-" + uuid.New().String()[:8]
+		_, _ = h.q.UpsertNotificationPrefs(r.Context(), sqlc.UpsertNotificationPrefsParams{
+			UserID:             uid,
+			WaterReminders:     true,
+			WaterIntervalHours: 2,
+			MealReminders:      true,
+			IfWindowReminders:  true,
+			StreakReminders:    true,
+			QuietStart:         22,
+			QuietEnd:           8,
+			NtfyTopic:         ntfyTopic,
+		})
+	} else {
+		ntfyTopic = prefs.NtfyTopic
+	}
+
+	ntfyURL := ""
+	if h.cfg.NtfyBaseURL != "" && ntfyTopic != "" {
+		ntfyURL = fmt.Sprintf("%s/%s", h.cfg.NtfyBaseURL, ntfyTopic)
+	}
+
+	writeJSON(w, http.StatusOK, apiResponse{Data: map[string]string{
+		"status":    "subscribed",
+		"ntfy_url":  ntfyURL,
+		"ntfy_topic": ntfyTopic,
+	}})
 }
 
 type unsubscribeRequest struct {

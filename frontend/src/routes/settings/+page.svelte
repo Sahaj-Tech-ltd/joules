@@ -76,6 +76,7 @@
   let notifSaved = $state(false);
   let notifTesting = $state(false);
   let vapidPublicKey = $state('');
+  let ntfyURL = $state('');  // auto-filled after subscribe
 
   let objective = $state('maintain');
   let dietPlan = $state('balanced');
@@ -138,6 +139,9 @@
             api.get<{public_key: string}>('/notifications/vapid-public-key'),
           ]);
           notifPrefs = notifData;
+          if (notifData.ntfy_topic && vapidPublicKey) {
+            ntfyURL = `${import.meta.env.VITE_NTFY_BASE_URL || 'https://ntfy.databunker.uk'}/${notifData.ntfy_topic}`;
+          }
           vapidPublicKey = vapidData.public_key;
         } catch {}
 
@@ -262,7 +266,7 @@
     });
 
     const json = sub.toJSON();
-    await api.post('/notifications/subscribe', {
+    const sub_result = await api.post<{ntfy_url?: string; ntfy_topic?: string}>('/notifications/subscribe', {
       endpoint: json.endpoint,
       p256dh: (json.keys as Record<string, string>).p256dh,
       auth: (json.keys as Record<string, string>).auth,
@@ -270,6 +274,8 @@
     });
 
     notifSubscribed = true;
+    if (sub_result?.ntfy_url) ntfyURL = sub_result.ntfy_url;
+    if (sub_result?.ntfy_url) ntfyURL = sub_result.ntfy_url;
   }
 
   async function disableNotifications() {
@@ -774,18 +780,26 @@
                 </div>
               </div>
 
-              <!-- ntfy topic -->
-              <div class="mb-5">
-                <label class="block mb-1 text-xs font-medium text-slate-400" for="ntfy-topic">
-                  ntfy topic (optional — for reliable delivery when browser is fully closed)
-                </label>
-                <input id="ntfy-topic" type="text" bind:value={notifPrefs.ntfy_topic}
-                  placeholder="e.g. joules-harsh-abc123"
-                  class="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:border-joule-500 focus:outline-none" />
-                <p class="mt-1.5 text-xs text-slate-500">
-                  Set up ntfy at <span class="text-slate-400">ntfy.databunker.uk</span>, subscribe to a topic, then enter it here.
-                  You'll need the <a href="https://ntfy.sh" target="_blank" class="text-joule-400 underline">ntfy app</a> on your phone.
-                </p>
+              <!-- ntfy — auto-configured, just tap subscribe -->
+              <div class="mb-5 rounded-xl border border-slate-700/50 bg-slate-800/50 p-4">
+                <div class="flex items-start justify-between gap-3">
+                  <div>
+                    <p class="text-sm font-medium text-slate-200">ntfy — reliable when browser is closed</p>
+                    <p class="text-xs text-slate-500 mt-0.5">
+                      Works via the <a href="https://ntfy.sh" target="_blank" class="text-joule-400 underline">ntfy app</a> on your phone even when the browser is fully quit.
+                    </p>
+                  </div>
+                  {#if ntfyURL}
+                    <a href={ntfyURL.replace('https://', 'ntfy://')} class="shrink-0 rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-600 transition">
+                      Subscribe ↗
+                    </a>
+                  {:else}
+                    <span class="shrink-0 text-xs text-slate-600">Auto-configured on enable</span>
+                  {/if}
+                </div>
+                {#if ntfyURL}
+                  <p class="mt-2 text-xs text-slate-600 font-mono break-all">{ntfyURL}</p>
+                {/if}
               </div>
 
               <!-- Save + test -->
