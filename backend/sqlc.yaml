@@ -1,0 +1,22 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    queries: "sql/queries"
+    schema: "internal/db/schema.sql"
+    gen:
+      go:
+        package: "sqlc"
+        out: "internal/db/sqlc"
+        sql_package: "pgx/v5"
+        emit_json_tags: true
+        emit_prepared_queries: false
+        emit_pointers_for_null_types: true
+        overrides:
+          - db_type: "uuid"
+            go_type: "string"
+          - db_type: "timestamptz"
+            go_type: "time.Time"
+          - db_type: "numeric"
+            go_type: "float64"
+          - db_type: "date"
+            go_type: "time.Time"

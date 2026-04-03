@@ -1,0 +1,57 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# AI / IDE assistant context
+.claude/
+CLAUDE.md
+
+# Superpowers plans / specs (internal development docs)
+docs/superpowers/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+*.o
+*.a
+backend/cmd/server/dist/
+
+# Node / Frontend
+node_modules/
+frontend/.svelte-kit/
+frontend/build/
+frontend/test-results/
+frontend/playwright-report/
+
+# Playwright
+frontend/tests/e2e/helpers/.auth-state.json
+
+# Python
+__pycache__/
+*.pyc
+test_smtp.py
+
+# Docker volumes
+uploads/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.tmp/
+
+# Logs
+*.log
+nohup.out
