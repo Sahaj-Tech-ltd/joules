@@ -22,8 +22,12 @@ func NewHandler(q *sqlc.Queries) *Handler {
 	return &Handler{q: q}
 }
 
-func getUserID(r *http.Request) string {
-	return r.Context().Value(auth.ContextUserID).(string)
+func getUserID(r *http.Request) (string, error) {
+	userID, ok := r.Context().Value(auth.ContextUserID).(string)
+	if !ok {
+		return "", fmt.Errorf("unauthorized")
+	}
+	return userID, nil
 }
 
 func numericToFloat(n pgtype.Numeric) float64 {
@@ -55,7 +59,11 @@ func clampDateRange(fromDate, toDate time.Time) (time.Time, time.Time) {
 
 func (h *Handler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	exportType := r.URL.Query().Get("type")
 	if exportType == "" {
 		exportType = "meals"
@@ -102,7 +110,7 @@ func (h *Handler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 	case "exercise":
 		cw.Write([]string{"Date", "Name", "Duration (min)", "Calories Burned"})
 		for d := fromDate; !d.After(toDate); d = d.AddDate(0, 0, 1) {
-			exercises, err := h.q.GetExercisesByDate(ctx, sqlc.GetExercisesByDateParams{UserID: userID, Timestamp: d})
+			exercises, err := h.q.GetExercisesByDate(ctx, sqlc.GetExercisesByDateParams{UserID: userID, Timestamp: d, Column3: "UTC"})
 			if err != nil {
 				continue
 			}
@@ -162,7 +170,11 @@ type exerciseRow struct {
 
 func (h *Handler) ExportJSON(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	exportType := r.URL.Query().Get("type")
 	if exportType == "" {
 		exportType = "meals"
@@ -215,7 +227,7 @@ func (h *Handler) ExportJSON(w http.ResponseWriter, r *http.Request) {
 	case "exercise":
 		var rows []exerciseRow
 		for d := fromDate; !d.After(toDate); d = d.AddDate(0, 0, 1) {
-			exercises, err := h.q.GetExercisesByDate(ctx, sqlc.GetExercisesByDateParams{UserID: userID, Timestamp: d})
+			exercises, err := h.q.GetExercisesByDate(ctx, sqlc.GetExercisesByDateParams{UserID: userID, Timestamp: d, Column3: "UTC"})
 			if err != nil {
 				continue
 			}

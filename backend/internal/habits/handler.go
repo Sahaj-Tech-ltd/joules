@@ -45,8 +45,12 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, apiResponse{Error: msg})
 }
 
-func getUserID(r *http.Request) string {
-	return r.Context().Value(auth.ContextUserID).(string)
+func getUserID(r *http.Request) (string, error) {
+	userID, ok := r.Context().Value(auth.ContextUserID).(string)
+	if !ok {
+		return "", fmt.Errorf("unauthorized")
+	}
+	return userID, nil
 }
 
 // HabitSummary is the response for GET /habits/summary.
@@ -176,7 +180,11 @@ func (h *Handler) todayPoints(ctx context.Context, userID string, today time.Tim
 
 // GetSummary handles GET /habits/summary.
 func (h *Handler) GetSummary(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	ctx := r.Context()
 	today := time.Now().UTC().Truncate(24 * time.Hour)
 
@@ -216,7 +224,11 @@ func (h *Handler) GetSummary(w http.ResponseWriter, r *http.Request) {
 // Checkin handles POST /habits/checkin.
 // Idempotent: if already checked in today, returns current stats unchanged.
 func (h *Handler) Checkin(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	ctx := r.Context()
 	today := time.Now().UTC().Truncate(24 * time.Hour)
 	yesterday := today.AddDate(0, 0, -1)

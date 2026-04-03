@@ -55,8 +55,12 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, apiResponse{Error: msg})
 }
 
-func getUserID(r *http.Request) string {
-	return r.Context().Value(auth.ContextUserID).(string)
+func getUserID(r *http.Request) (string, error) {
+	userID, ok := r.Context().Value(auth.ContextUserID).(string)
+	if !ok {
+		return "", fmt.Errorf("unauthorized")
+	}
+	return userID, nil
 }
 
 func tzNow(tz string) time.Time {
@@ -90,7 +94,11 @@ func (h *Handler) LogWater(w http.ResponseWriter, r *http.Request) {
 		date = tzNow(r.Header.Get("X-Timezone"))
 	}
 
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 
 	logged, err := h.q.LogWater(r.Context(), sqlc.LogWaterParams{
 		UserID:   userID,
@@ -123,7 +131,11 @@ func (h *Handler) GetWaterByDate(w http.ResponseWriter, r *http.Request) {
 		date = tzNow(r.Header.Get("X-Timezone"))
 	}
 
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 
 	total, err := h.q.GetWaterByDate(r.Context(), sqlc.GetWaterByDateParams{
 		UserID: userID,

@@ -57,15 +57,6 @@ func (q *Queries) CreateFoodItem(ctx context.Context, arg CreateFoodItemParams) 
 	return i, err
 }
 
-const deleteFoodItem = `-- name: DeleteFoodItem :exec
-DELETE FROM food_items WHERE id = $1
-`
-
-func (q *Queries) DeleteFoodItem(ctx context.Context, id string) error {
-	_, err := q.db.Exec(ctx, deleteFoodItem, id)
-	return err
-}
-
 const deleteFoodItemByUser = `-- name: DeleteFoodItemByUser :exec
 DELETE FROM food_items WHERE food_items.id = $1 AND food_items.meal_id IN (SELECT meals.id FROM meals WHERE meals.user_id = $2)
 `
@@ -118,7 +109,7 @@ func (q *Queries) GetFoodItemsByMeal(ctx context.Context, mealID string) ([]Food
 const updateFoodItem = `-- name: UpdateFoodItem :exec
 UPDATE food_items
 SET name = $1, calories = $2, protein_g = $3, carbs_g = $4, fat_g = $5, fiber_g = $6, serving_size = $7
-WHERE id = $8
+WHERE food_items.id = $8 AND food_items.meal_id IN (SELECT meals.id FROM meals WHERE meals.user_id = $9)
 `
 
 type UpdateFoodItemParams struct {
@@ -130,6 +121,7 @@ type UpdateFoodItemParams struct {
 	FiberG      pgtype.Numeric `json:"fiber_g"`
 	ServingSize *string        `json:"serving_size"`
 	ID          string         `json:"id"`
+	UserID      string         `json:"user_id"`
 }
 
 func (q *Queries) UpdateFoodItem(ctx context.Context, arg UpdateFoodItemParams) error {
@@ -142,6 +134,7 @@ func (q *Queries) UpdateFoodItem(ctx context.Context, arg UpdateFoodItemParams) 
 		arg.FiberG,
 		arg.ServingSize,
 		arg.ID,
+		arg.UserID,
 	)
 	return err
 }

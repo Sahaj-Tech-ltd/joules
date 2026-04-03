@@ -9,7 +9,9 @@ CREATE TABLE users (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     is_admin BOOLEAN NOT NULL DEFAULT FALSE,
-    approved BOOLEAN NOT NULL DEFAULT TRUE
+    approved BOOLEAN NOT NULL DEFAULT TRUE,
+    must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
+    verification_code_expires_at TIMESTAMPTZ
 );
 
 CREATE TABLE user_profiles (
@@ -21,6 +23,8 @@ CREATE TABLE user_profiles (
     weight_kg NUMERIC(5,1),
     target_weight_kg NUMERIC(5,1),
     activity_level TEXT CHECK (activity_level IN ('sedentary', 'light', 'moderate', 'active', 'very_active')),
+    avatar_url TEXT,
+    coach_notes TEXT NOT NULL DEFAULT '',
     onboarding_complete BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -29,7 +33,7 @@ CREATE TABLE user_profiles (
 CREATE TABLE user_goals (
     user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     objective TEXT NOT NULL CHECK (objective IN ('cut_fat', 'feel_better', 'maintain', 'build_muscle')),
-    diet_plan TEXT NOT NULL CHECK (diet_plan IN ('calorie_deficit', 'keto', 'intermittent_fasting', 'paleo', 'mediterranean')),
+    diet_plan TEXT NOT NULL CHECK (diet_plan IN ('calorie_deficit', 'keto', 'intermittent_fasting', 'paleo', 'mediterranean', 'balanced')),
     fasting_window TEXT CHECK (fasting_window IN ('16:8', '18:6', '20:4', 'omad')),
     daily_calorie_target INT NOT NULL DEFAULT 2000,
     daily_protein_g INT NOT NULL DEFAULT 150,
@@ -62,7 +66,7 @@ CREATE TABLE food_items (
     fat_g NUMERIC(8,1) NOT NULL DEFAULT 0,
     fiber_g NUMERIC(8,1) NOT NULL DEFAULT 0,
     serving_size TEXT DEFAULT '',
-    source TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('ai', 'manual'))
+    source TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('ai', 'manual', 'leftover', 'db', 'barcode', 'recipe'))
 );
 
 CREATE TABLE weight_logs (
@@ -127,7 +131,7 @@ CREATE TABLE step_logs (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     date DATE NOT NULL,
     step_count INT NOT NULL DEFAULT 0,
-    source TEXT NOT NULL DEFAULT 'manual',
+    source TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'google_fit')),
     PRIMARY KEY (user_id, date)
 );
 
@@ -144,6 +148,10 @@ CREATE TABLE IF NOT EXISTS user_preferences (
     allergies TEXT[] NOT NULL DEFAULT '{}',
     food_notes TEXT NOT NULL DEFAULT '',
     eating_context TEXT NOT NULL DEFAULT '',
+    height_unit TEXT NOT NULL DEFAULT 'cm',
+    weight_unit TEXT NOT NULL DEFAULT 'kg',
+    energy_unit TEXT NOT NULL DEFAULT 'kcal',
+    dietary_restrictions TEXT[] NOT NULL DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -156,6 +164,13 @@ CREATE TABLE IF NOT EXISTS app_settings (
 
 INSERT INTO app_settings (key, value) VALUES ('require_approval', 'false')
 ON CONFLICT (key) DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('ai_provider', '') ON CONFLICT (key) DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('ai_model', '') ON CONFLICT (key) DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('routing_model', '') ON CONFLICT (key) DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('vision_model', '') ON CONFLICT (key) DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('ocr_model', '') ON CONFLICT (key) DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('custom_base_url', '') ON CONFLICT (key) DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('custom_api_key', '') ON CONFLICT (key) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS push_subscriptions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -231,11 +246,97 @@ CREATE TABLE IF NOT EXISTS group_challenges (
     target_value INT NOT NULL DEFAULT 7,
     start_date DATE NOT NULL,
     end_date DATE NOT NULL,
-    created_by UUID NOT NULL REFERENCES users(id),
+    created_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Habit tracking / points
+-- Admin banners
+CREATE TABLE IF NOT EXISTS admin_banners (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title TEXT NOT NULL DEFAULT '',
+    message TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'info',
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    expires_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- System logs
+CREATE TABLE IF NOT EXISTS system_logs (
+    id BIGSERIAL PRIMARY KEY,
+    level TEXT NOT NULL DEFAULT 'info',
+    category TEXT NOT NULL DEFAULT 'general',
+    message TEXT NOT NULL,
+    details JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Foods database (populated via admin import or API fallback)
+CREATE TABLE IF NOT EXISTS foods_db (
+    id BIGSERIAL PRIMARY KEY,
+    barcode TEXT,
+    name TEXT NOT NULL,
+    brand TEXT NOT NULL DEFAULT '',
+    calories INT NOT NULL DEFAULT 0,
+    protein_g NUMERIC(7,2) NOT NULL DEFAULT 0,
+    carbs_g NUMERIC(7,2) NOT NULL DEFAULT 0,
+    fat_g NUMERIC(7,2) NOT NULL DEFAULT 0,
+    fiber_g NUMERIC(7,2) NOT NULL DEFAULT 0,
+    serving_size TEXT NOT NULL DEFAULT '100g',
+    ingredients TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS foods_db_barcode_idx ON foods_db(barcode) WHERE barcode IS NOT NULL AND barcode != '';
+CREATE INDEX IF NOT EXISTS foods_db_name_fts_idx ON foods_db USING GIN (to_tsvector('english', name));
+CREATE INDEX IF NOT EXISTS foods_db_name_trgm_idx ON foods_db(lower(name));
+
+-- User recipes
+CREATE TABLE IF NOT EXISTS recipes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS recipes_user_idx ON recipes(user_id);
+
+CREATE TABLE IF NOT EXISTS recipe_foods (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    recipe_id UUID NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    calories INT NOT NULL DEFAULT 0,
+    protein_g NUMERIC(7,2) NOT NULL DEFAULT 0,
+    carbs_g NUMERIC(7,2) NOT NULL DEFAULT 0,
+    fat_g NUMERIC(7,2) NOT NULL DEFAULT 0,
+    fiber_g NUMERIC(7,2) NOT NULL DEFAULT 0,
+    serving_size TEXT NOT NULL DEFAULT '',
+    sort_order INT NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS recipe_foods_recipe_idx ON recipe_foods(recipe_id);
+
+-- Coach memory: auto-extracted facts about users
+CREATE TABLE IF NOT EXISTS coach_memory (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    category TEXT NOT NULL,
+    content TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'agent',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_coach_memory_user ON coach_memory(user_id, category);
+
+-- Coach reminders
+CREATE TABLE IF NOT EXISTS coach_reminders (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type TEXT NOT NULL DEFAULT 'custom',
+    message TEXT NOT NULL,
+    reminder_time TIME NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_coach_reminders_user ON coach_reminders(user_id);
 CREATE TABLE IF NOT EXISTS user_stats (
     user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     total_points INT NOT NULL DEFAULT 0,
@@ -243,24 +344,6 @@ CREATE TABLE IF NOT EXISTS user_stats (
     last_active_date DATE,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-
-CREATE TABLE IF NOT EXISTS food_favorites (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    calories INT NOT NULL DEFAULT 0,
-    protein_g NUMERIC(8,1) NOT NULL DEFAULT 0,
-    carbs_g NUMERIC(8,1) NOT NULL DEFAULT 0,
-    fat_g NUMERIC(8,1) NOT NULL DEFAULT 0,
-    fiber_g NUMERIC(8,1) NOT NULL DEFAULT 0,
-    serving_size TEXT NOT NULL DEFAULT '',
-    source TEXT NOT NULL DEFAULT 'manual',
-    use_count INT NOT NULL DEFAULT 0,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS food_favorites_user_idx ON food_favorites(user_id);
-
 
 CREATE TABLE IF NOT EXISTS food_favorites (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

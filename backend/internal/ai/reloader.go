@@ -26,7 +26,7 @@ func NewReloadingClient(pool *pgxpool.Pool, envCfg Config) *ReloadingClient {
 		ttl:    30 * time.Second,
 	}
 	// Initial load from env config (before DB is available or has settings)
-	client, _ := NewClient(envCfg)
+	client := NewMultiProviderClient(envCfg)
 	rc.current = client
 	return rc
 }
@@ -96,8 +96,15 @@ func (rc *ReloadingClient) loadFromDB() Client {
 		ocrModel = model
 	}
 
+	classifierModel := getSetting("classifier_model")
+	if classifierModel == "" {
+		classifierModel = rc.envCfg.ClassifierModel
+	}
+	if classifierModel == "" {
+		classifierModel = ocrModel
+	}
+
 	openaiKey := rc.envCfg.OpenAIKey
-	anthropicKey := rc.envCfg.AnthropicKey
 	baseURL := rc.envCfg.OpenAIBaseURL
 
 	switch provider {
@@ -108,7 +115,7 @@ func (rc *ReloadingClient) loadFromDB() Client {
 		if customKey := getSetting("custom_api_key"); customKey != "" {
 			openaiKey = customKey
 		}
-		provider = "openai" // custom providers use OpenAI-compatible API
+		provider = "openai"
 	}
 
 	prompts := make(map[string]string)
@@ -126,23 +133,52 @@ func (rc *ReloadingClient) loadFromDB() Client {
 		prompts = rc.envCfg.Prompts
 	}
 
-	cfg := Config{
-		Provider:      provider,
-		OpenAIKey:     openaiKey,
-		OpenAIBaseURL: baseURL,
-		AnthropicKey:  anthropicKey,
-		Model:         model,
-		VisionModel:   visionModel,
-		OCRModel:      ocrModel,
-		Prompts:       prompts,
+	visionAPIKey := getSetting("vision_api_key")
+	visionBaseURL := getSetting("vision_base_url")
+	if visionAPIKey == "" {
+		visionAPIKey = rc.envCfg.VisionAPIKey
+	}
+	if visionBaseURL == "" {
+		visionBaseURL = rc.envCfg.VisionBaseURL
 	}
 
-	client, err := NewClient(cfg)
-	if err != nil {
-		slog.Error("failed to create AI client from DB config", "error", err)
-		return nil
+	ocrAPIKey := getSetting("ocr_api_key")
+	ocrBaseURL := getSetting("ocr_base_url")
+	if ocrAPIKey == "" {
+		ocrAPIKey = rc.envCfg.OCRAPIKey
 	}
-	slog.Info("AI client reloaded from DB", "provider", provider, "model", model, "vision", visionModel, "ocr", ocrModel)
+	if ocrBaseURL == "" {
+		ocrBaseURL = rc.envCfg.OCRBaseURL
+	}
+
+	classifierAPIKey := getSetting("classifier_api_key")
+	classifierBaseURL := getSetting("classifier_base_url")
+	if classifierAPIKey == "" {
+		classifierAPIKey = rc.envCfg.ClassifierAPIKey
+	}
+	if classifierBaseURL == "" {
+		classifierBaseURL = rc.envCfg.ClassifierBaseURL
+	}
+
+	cfg := Config{
+		Provider:          provider,
+		OpenAIKey:         openaiKey,
+		OpenAIBaseURL:     baseURL,
+		Model:             model,
+		VisionModel:       visionModel,
+		OCRModel:          ocrModel,
+		Prompts:           prompts,
+		VisionAPIKey:      visionAPIKey,
+		VisionBaseURL:     visionBaseURL,
+		OCRAPIKey:         ocrAPIKey,
+		OCRBaseURL:        ocrBaseURL,
+		ClassifierAPIKey:  classifierAPIKey,
+		ClassifierBaseURL: classifierBaseURL,
+		ClassifierModel:   classifierModel,
+	}
+
+	client := NewMultiProviderClient(cfg)
+	slog.Info("AI client reloaded from DB", "provider", provider, "model", model, "vision", visionModel, "ocr", ocrModel, "classifier", classifierModel)
 	return client
 }
 

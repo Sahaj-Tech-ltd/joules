@@ -693,15 +693,32 @@
                 {:else}
                   <div class="flex gap-3 overflow-x-auto pb-2">
                     {#each recipes as recipe}
-                      <button
-                        type="button"
-                        onclick={() => logFromRecipe(recipe)}
-                        class="flex-none rounded-xl border border-border bg-card/60 px-4 py-3 text-left hover:border-primary/30 hover:bg-primary/5 transition min-w-[140px]"
-                      >
-                        <p class="truncate text-sm font-medium text-foreground max-w-[130px]">{recipe.name}</p>
-                        <p class="mt-1 text-xs font-semibold text-primary">{recipeCalories(recipe)} kcal</p>
-                        <p class="text-xs text-muted-foreground">{recipe.foods.length} item{recipe.foods.length !== 1 ? 's' : ''}</p>
-                      </button>
+                      <div class="relative flex-none rounded-xl border border-border bg-card/60 px-4 py-3 text-left hover:border-primary/30 hover:bg-primary/5 transition min-w-[140px] group">
+                        <button
+                          type="button"
+                          onclick={() => logFromRecipe(recipe)}
+                          class="w-full text-left"
+                        >
+                          <p class="truncate text-sm font-medium text-foreground max-w-[130px]">{recipe.name}</p>
+                          <p class="mt-1 text-xs font-semibold text-primary">{recipeCalories(recipe)} kcal</p>
+                          <p class="text-xs text-muted-foreground">{recipe.foods.length} item{recipe.foods.length !== 1 ? 's' : ''}</p>
+                        </button>
+                        <button
+                          type="button"
+                          onclick={async () => {
+                            try {
+                              await api.del(`/recipes/${recipe.id}`);
+                              recipes = recipes.filter(r => r.id !== recipe.id);
+                            } catch {}
+                          }}
+                          aria-label="Delete recipe"
+                          class="absolute top-1.5 right-1.5 rounded-lg p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-red-400 hover:bg-red-500/10 transition"
+                        >
+                          <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      </div>
                     {/each}
                   </div>
                 {/if}

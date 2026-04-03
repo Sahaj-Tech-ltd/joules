@@ -7,22 +7,30 @@ package sqlc
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO users (email, password_hash, verification_code)
-VALUES ($1, $2, $3)
-RETURNING id, email, password_hash, verification_code, verified, created_at, updated_at, is_admin, approved
+INSERT INTO users (email, password_hash, verification_code, verification_code_expires_at)
+VALUES ($1, $2, $3, $4)
+RETURNING id, email, password_hash, verification_code, verified, created_at, updated_at, is_admin, approved, must_change_password, verification_code_expires_at
 `
 
 type CreateUserParams struct {
-	Email            string  `json:"email"`
-	PasswordHash     string  `json:"password_hash"`
-	VerificationCode *string `json:"verification_code"`
+	Email                     string             `json:"email"`
+	PasswordHash              string             `json:"password_hash"`
+	VerificationCode          *string            `json:"verification_code"`
+	VerificationCodeExpiresAt pgtype.Timestamptz `json:"verification_code_expires_at"`
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
-	row := q.db.QueryRow(ctx, createUser, arg.Email, arg.PasswordHash, arg.VerificationCode)
+	row := q.db.QueryRow(ctx, createUser,
+		arg.Email,
+		arg.PasswordHash,
+		arg.VerificationCode,
+		arg.VerificationCodeExpiresAt,
+	)
 	var i User
 	err := row.Scan(
 		&i.ID,
@@ -34,12 +42,14 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.UpdatedAt,
 		&i.IsAdmin,
 		&i.Approved,
+		&i.MustChangePassword,
+		&i.VerificationCodeExpiresAt,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, verification_code, verified, created_at, updated_at, is_admin, approved FROM users WHERE email = $1 LIMIT 1
+SELECT id, email, password_hash, verification_code, verified, created_at, updated_at, is_admin, approved, must_change_password, verification_code_expires_at FROM users WHERE email = $1 LIMIT 1
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -55,12 +65,14 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.UpdatedAt,
 		&i.IsAdmin,
 		&i.Approved,
+		&i.MustChangePassword,
+		&i.VerificationCodeExpiresAt,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, password_hash, verification_code, verified, created_at, updated_at, is_admin, approved FROM users WHERE id = $1 LIMIT 1
+SELECT id, email, password_hash, verification_code, verified, created_at, updated_at, is_admin, approved, must_change_password, verification_code_expires_at FROM users WHERE id = $1 LIMIT 1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
@@ -76,6 +88,8 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
 		&i.UpdatedAt,
 		&i.IsAdmin,
 		&i.Approved,
+		&i.MustChangePassword,
+		&i.VerificationCodeExpiresAt,
 	)
 	return i, err
 }
@@ -109,7 +123,7 @@ func (q *Queries) UpdatePassword(ctx context.Context, arg UpdatePasswordParams) 
 
 const verifyUser = `-- name: VerifyUser :exec
 UPDATE users
-SET verified = TRUE, verification_code = NULL, updated_at = NOW()
+SET verified = TRUE, verification_code = NULL, verification_code_expires_at = NULL, updated_at = NOW()
 WHERE id = $1 AND verification_code = $2
 `
 

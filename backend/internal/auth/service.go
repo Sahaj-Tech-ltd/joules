@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 
@@ -27,6 +28,7 @@ var (
 	ErrUserExists         = errors.New("email already registered")
 	ErrNotVerified        = errors.New("account not verified")
 	ErrInvalidCode        = errors.New("invalid verification code")
+	ErrCodeExpired        = errors.New("verification code has expired")
 	ErrInvalidToken       = errors.New("invalid or expired token")
 	ErrNotApproved        = errors.New("account pending admin approval")
 )
@@ -142,11 +144,16 @@ func (s *Service) Signup(email, password string) (*SignupResponse, error) {
 	}
 
 	code := generateCode()
+	codeExpiresAt := time.Now().Add(15 * time.Minute)
 
 	user, err := s.q.CreateUser(context.Background(), sqlc.CreateUserParams{
 		Email:            email,
 		PasswordHash:     hash,
 		VerificationCode: &code,
+		VerificationCodeExpiresAt: pgtype.Timestamptz{
+			Time:  codeExpiresAt,
+			Valid: true,
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create user: %w", err)
@@ -155,15 +162,14 @@ func (s *Service) Signup(email, password string) (*SignupResponse, error) {
 	smtpHost, _, _, _ := s.effectiveSMTP()
 	if smtpHost != "" {
 		if err := s.sendVerificationEmail(email, code); err != nil {
-			slog.Warn("failed to send verification email", "error", err, "email", email)
-			slog.Info("verification code (email send failed)", "email", email, "code", code)
+			slog.Error("failed to send verification email", "email", email, "error", err)
 			syslog.Error("smtp", "Failed to send verification email", map[string]any{"email": email, "error": err.Error(), "date": time.Now().Format("2006-01-02")})
 		} else {
 			slog.Info("verification email sent", "email", email)
 			syslog.Info("smtp", "Verification email sent", map[string]any{"email": email, "date": time.Now().Format("2006-01-02")})
 		}
 	} else {
-		slog.Info("verification code (no SMTP configured)", "user_id", user.ID, "email", email, "code", code)
+		slog.Info("verification email not sent (no SMTP configured)", "email", email)
 		syslog.Info("smtp", "SMTP not configured — verification code logged only", map[string]any{"email": email})
 	}
 
@@ -255,7 +261,7 @@ func (s *Service) sendVerificationEmail(email, code string) error {
             <div style="display:inline-block;background-color:#f8fafc;border:2px solid #f59e0b;border-radius:12px;padding:20px 40px;margin-bottom:32px;">
               <span style="font-family:'Courier New',Courier,monospace;font-size:36px;font-weight:700;color:#0f172a;letter-spacing:8px;">%s</span>
             </div>
-            <p style="margin:0;font-size:13px;color:#94a3b8;line-height:1.6;">Enter this code in the app to activate your account.<br>This code does not expire.</p>
+            <p style="margin:0;font-size:13px;color:#94a3b8;line-height:1.6;">Enter this code in the app to activate your account.<br>This code expires in 15 minutes.</p>
           </td>
         </tr>
         <!-- Footer -->
@@ -270,7 +276,7 @@ func (s *Service) sendVerificationEmail(email, code string) error {
 </body>
 </html>`, code)
 
-	plainBody := fmt.Sprintf("Hi,\r\n\r\nYour Joule verification code is:\r\n\r\n  %s\r\n\r\nEnter this in the app to complete your signup. It won't expire.\r\n\r\nIf you didn't sign up for Joule, ignore this email.\r\n", code)
+	plainBody := fmt.Sprintf("Hi,\r\n\r\nYour Joule verification code is:\r\n\r\n  %s\r\n\r\nEnter this in the app to complete your signup. It expires in 15 minutes.\r\n\r\nIf you didn't sign up for Joule, ignore this email.\r\n", code)
 
 	smtpHost, smtpPort, smtpUser, smtpPass := s.effectiveSMTP()
 
@@ -332,6 +338,11 @@ func (s *Service) Verify(email, code string) error {
 
 	if user.VerificationCode == nil || *user.VerificationCode != code {
 		return ErrInvalidCode
+	}
+
+	// Check if the verification code has expired
+	if user.VerificationCodeExpiresAt.Valid && time.Now().After(user.VerificationCodeExpiresAt.Time) {
+		return ErrCodeExpired
 	}
 
 	return s.q.VerifyUser(context.Background(), sqlc.VerifyUserParams{

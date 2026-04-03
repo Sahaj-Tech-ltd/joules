@@ -42,8 +42,12 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, apiResponse{Error: msg})
 }
 
-func getUserID(r *http.Request) string {
-	return r.Context().Value(auth.ContextUserID).(string)
+func getUserID(r *http.Request) (string, error) {
+	userID, ok := r.Context().Value(auth.ContextUserID).(string)
+	if !ok {
+		return "", fmt.Errorf("unauthorized")
+	}
+	return userID, nil
 }
 
 func windowToHours(window string) int {
@@ -83,7 +87,11 @@ type FastingStatusResponse struct {
 }
 
 func (h *Handler) GetStatus(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	ctx := r.Context()
 
 	goals, err := h.q.GetGoals(ctx, userID)
@@ -136,7 +144,11 @@ func (h *Handler) GetStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) StartFast(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	if err := h.q.StartFast(r.Context(), userID); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("start fast: %w", err))
 		return
@@ -145,7 +157,11 @@ func (h *Handler) StartFast(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) BreakFast(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	ctx := r.Context()
 
 	goals, err := h.q.GetGoals(ctx, userID)
@@ -192,7 +208,11 @@ type UpdateWindowRequest struct {
 }
 
 func (h *Handler) UpdateWindow(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	var req UpdateWindowRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, err)

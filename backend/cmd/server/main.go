@@ -125,15 +125,21 @@ func main() {
 	}
 
 	aiClient := ai.NewReloadingClient(pool, ai.Config{
-		Provider:      cfg.AIProvider,
-		OpenAIKey:     cfg.OpenAIKey,
-		OpenAIBaseURL: cfg.OpenAIBaseURL,
-		AnthropicKey:  cfg.AnthropicKey,
-		Model:         cfg.AIModel,
-		VisionModel:   cfg.VisionModel,
-		OCRModel:      cfg.OCRModel,
-		RoutingModel:  cfg.RoutingModel,
-		Prompts:       aiPrompts,
+		Provider:          cfg.AIProvider,
+		OpenAIKey:         cfg.OpenAIKey,
+		OpenAIBaseURL:     cfg.OpenAIBaseURL,
+		Model:             cfg.AIModel,
+		VisionModel:       cfg.VisionModel,
+		OCRModel:          cfg.OCRModel,
+		RoutingModel:      cfg.RoutingModel,
+		ClassifierModel:   cfg.ClassifierModel,
+		Prompts:           aiPrompts,
+		VisionAPIKey:      cfg.VisionAPIKey,
+		VisionBaseURL:     cfg.VisionBaseURL,
+		OCRAPIKey:         cfg.OCRAPIKey,
+		OCRBaseURL:        cfg.OCRBaseURL,
+		ClassifierAPIKey:  cfg.ClassifierAPIKey,
+		ClassifierBaseURL: cfg.ClassifierBaseURL,
 	})
 	mealHandler := meal.NewHandler(queries, aiClient, cfg.UploadDir, cfg, pool)
 	foodsHandler := foods.NewHandler(pool, aiClient)
@@ -161,7 +167,7 @@ func main() {
 
 	// Start notification scheduler in background
 	schedCtx, schedCancel := context.WithCancel(context.Background())
-	_ = schedCancel // cancelled on server shutdown via defer
+	defer schedCancel()
 	go notifySvc.StartScheduler(schedCtx)
 
 	r := chi.NewRouter()

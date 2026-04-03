@@ -22,6 +22,16 @@ type Achievement struct {
 	UnlockedAt      time.Time `json:"unlocked_at"`
 }
 
+type AdminBanner struct {
+	ID        string             `json:"id"`
+	Title     string             `json:"title"`
+	Message   string             `json:"message"`
+	Type      string             `json:"type"`
+	Active    bool               `json:"active"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt time.Time          `json:"created_at"`
+}
+
 type AppSetting struct {
 	Key       string    `json:"key"`
 	Value     string    `json:"value"`
@@ -33,12 +43,32 @@ type CheatDay struct {
 	Date   time.Time `json:"date"`
 }
 
+type CoachMemory struct {
+	ID        string    `json:"id"`
+	UserID    string    `json:"user_id"`
+	Category  string    `json:"category"`
+	Content   string    `json:"content"`
+	Source    string    `json:"source"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type CoachMessage struct {
 	ID        string    `json:"id"`
 	UserID    string    `json:"user_id"`
 	Role      string    `json:"role"`
 	Content   string    `json:"content"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+type CoachReminder struct {
+	ID           string      `json:"id"`
+	UserID       string      `json:"user_id"`
+	Type         string      `json:"type"`
+	Message      string      `json:"message"`
+	ReminderTime pgtype.Time `json:"reminder_time"`
+	Enabled      bool        `json:"enabled"`
+	CreatedAt    time.Time   `json:"created_at"`
 }
 
 type Exercise struct {
@@ -78,6 +108,21 @@ type FoodItem struct {
 	FiberG      pgtype.Numeric `json:"fiber_g"`
 	ServingSize *string        `json:"serving_size"`
 	Source      string         `json:"source"`
+}
+
+type FoodsDb struct {
+	ID          int64          `json:"id"`
+	Barcode     *string        `json:"barcode"`
+	Name        string         `json:"name"`
+	Brand       string         `json:"brand"`
+	Calories    int32          `json:"calories"`
+	ProteinG    pgtype.Numeric `json:"protein_g"`
+	CarbsG      pgtype.Numeric `json:"carbs_g"`
+	FatG        pgtype.Numeric `json:"fat_g"`
+	FiberG      pgtype.Numeric `json:"fiber_g"`
+	ServingSize string         `json:"serving_size"`
+	Ingredients string         `json:"ingredients"`
+	CreatedAt   time.Time      `json:"created_at"`
 }
 
 type GoogleFitToken struct {
@@ -164,6 +209,27 @@ type PushSubscription struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type Recipe struct {
+	ID          string    `json:"id"`
+	UserID      string    `json:"user_id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type RecipeFood struct {
+	ID          string         `json:"id"`
+	RecipeID    string         `json:"recipe_id"`
+	Name        string         `json:"name"`
+	Calories    int32          `json:"calories"`
+	ProteinG    pgtype.Numeric `json:"protein_g"`
+	CarbsG      pgtype.Numeric `json:"carbs_g"`
+	FatG        pgtype.Numeric `json:"fat_g"`
+	FiberG      pgtype.Numeric `json:"fiber_g"`
+	ServingSize string         `json:"serving_size"`
+	SortOrder   int32          `json:"sort_order"`
+}
+
 type StepLog struct {
 	UserID    string    `json:"user_id"`
 	Date      time.Time `json:"date"`
@@ -171,16 +237,27 @@ type StepLog struct {
 	Source    string    `json:"source"`
 }
 
+type SystemLog struct {
+	ID        int64     `json:"id"`
+	Level     string    `json:"level"`
+	Category  string    `json:"category"`
+	Message   string    `json:"message"`
+	Details   []byte    `json:"details"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type User struct {
-	ID               string    `json:"id"`
-	Email            string    `json:"email"`
-	PasswordHash     string    `json:"password_hash"`
-	VerificationCode *string   `json:"verification_code"`
-	Verified         bool      `json:"verified"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
-	IsAdmin          bool      `json:"is_admin"`
-	Approved         bool      `json:"approved"`
+	ID                        string             `json:"id"`
+	Email                     string             `json:"email"`
+	PasswordHash              string             `json:"password_hash"`
+	VerificationCode          *string            `json:"verification_code"`
+	Verified                  bool               `json:"verified"`
+	CreatedAt                 time.Time          `json:"created_at"`
+	UpdatedAt                 time.Time          `json:"updated_at"`
+	IsAdmin                   bool               `json:"is_admin"`
+	Approved                  bool               `json:"approved"`
+	MustChangePassword        bool               `json:"must_change_password"`
+	VerificationCodeExpiresAt pgtype.Timestamptz `json:"verification_code_expires_at"`
 }
 
 type UserGoal struct {
@@ -200,13 +277,17 @@ type UserGoal struct {
 }
 
 type UserPreference struct {
-	UserID        string    `json:"user_id"`
-	DietType      string    `json:"diet_type"`
-	Allergies     []string  `json:"allergies"`
-	FoodNotes     string    `json:"food_notes"`
-	EatingContext string    `json:"eating_context"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	UserID              string    `json:"user_id"`
+	DietType            string    `json:"diet_type"`
+	Allergies           []string  `json:"allergies"`
+	FoodNotes           string    `json:"food_notes"`
+	EatingContext       string    `json:"eating_context"`
+	HeightUnit          string    `json:"height_unit"`
+	WeightUnit          string    `json:"weight_unit"`
+	EnergyUnit          string    `json:"energy_unit"`
+	DietaryRestrictions []string  `json:"dietary_restrictions"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 type UserProfile struct {
@@ -218,6 +299,8 @@ type UserProfile struct {
 	WeightKg           pgtype.Numeric `json:"weight_kg"`
 	TargetWeightKg     pgtype.Numeric `json:"target_weight_kg"`
 	ActivityLevel      *string        `json:"activity_level"`
+	AvatarUrl          *string        `json:"avatar_url"`
+	CoachNotes         string         `json:"coach_notes"`
 	OnboardingComplete bool           `json:"onboarding_complete"`
 	CreatedAt          time.Time      `json:"created_at"`
 	UpdatedAt          time.Time      `json:"updated_at"`

@@ -1,12 +1,13 @@
 <script lang="ts">
   import { marked } from 'marked';
+  import DOMPurify from 'dompurify';
 
   let { text = '' }: { text?: string } = $props();
 
   let html = $derived.by(() => {
     if (!text) return '';
     const result = marked.parse(text, { async: false, breaks: true }) as string;
-    return result;
+    return DOMPurify.sanitize(result);
   });
 </script>
 

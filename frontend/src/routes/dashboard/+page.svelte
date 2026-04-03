@@ -102,64 +102,63 @@
   let exportType = $state('meals');
   let exportFormat = $state('csv');
 
+  const today = new Date().toISOString().split('T')[0];
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const from = thirtyDaysAgo.toISOString().split('T')[0];
+  const to = today;
+
+  async function checkAchievements() {
+    try {
+      const unlocked = await api.post<{ id: string; title: string; description: string; unlocked_at: string }[]>('/achievements/check', {});
+      if (Array.isArray(unlocked)) {
+        const twoMinAgo = Date.now() - 2 * 60 * 1000;
+        for (const a of unlocked) {
+          if (new Date(a.unlocked_at).getTime() >= twoMinAgo) {
+            showAchievement({ id: a.id, title: a.title, description: a.description });
+          }
+        }
+      }
+    } catch {}
+  }
+
+  async function refreshDashboard() {
+    try {
+      const stored = localStorage.getItem('unit_prefs');
+      if (stored) unitPrefs = { ...defaultUnits, ...JSON.parse(stored) };
+    } catch {}
+    try {
+      const [p, g, s, m, w, ex, hs] = await Promise.all([
+        api.get<UserProfile>('/user/profile'),
+        api.get<UserGoals>('/user/goals'),
+        api.get<SummaryResponse>(`/dashboard/summary?date=${today}`),
+        api.get<MealResponse[]>('/meals/recent'),
+        api.get<WeightResponse[]>(`/weight?from=${from}&to=${to}`),
+        api.get<ExerciseResponse[]>(`/exercises?date=${today}`),
+        api.get<HabitSummary>('/habits/summary').catch(() => null)
+      ]);
+      profile = p;
+      goals = g;
+      summary = s;
+      recentMeals = m;
+      weightHistory = w;
+      exercises = ex;
+      habitSummary = hs;
+      userProfile.set(p);
+      userGoals.set(g);
+      api.get<{ tips: string }>('/coach/tips').then(t => { tips = t.tips; }).catch(() => { tips = ''; });
+      api.get<Array<{id: string; name: string; calories: number}>>('/favorites/top').then(f => { quickAddFavorites = f; }).catch(() => {});
+      api.get<FastingStatus>('/fasting/status').then(s => { fastingStatus = s; }).catch(() => {});
+      api.post<HabitSummary>('/habits/checkin', {}).then(r => { if (r) habitSummary = r; }).catch(() => {});
+      checkAchievements();
+    } catch {}
+    finally { loading = false; }
+  }
+
   onMount(() => {
     const unsub = authToken.subscribe((token) => {
       if (!token) goto('/login');
     });
-
-    const today = new Date().toISOString().split('T')[0];
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const from = thirtyDaysAgo.toISOString().split('T')[0];
-    const to = today;
-
-    async function checkAchievements() {
-      try {
-        const unlocked = await api.post<{ id: string; title: string; description: string; unlocked_at: string }[]>('/achievements/check', {});
-        if (Array.isArray(unlocked)) {
-          const twoMinAgo = Date.now() - 2 * 60 * 1000;
-          for (const a of unlocked) {
-            if (new Date(a.unlocked_at).getTime() >= twoMinAgo) {
-              showAchievement({ id: a.id, title: a.title, description: a.description });
-            }
-          }
-        }
-      } catch {}
-    }
-
-    async function refreshDashboard() {
-      // Load unit prefs from localStorage (fast, no extra API call)
-      try {
-        const stored = localStorage.getItem('unit_prefs');
-        if (stored) unitPrefs = { ...defaultUnits, ...JSON.parse(stored) };
-      } catch {}
-      try {
-        const [p, g, s, m, w, ex, hs] = await Promise.all([
-          api.get<UserProfile>('/user/profile'),
-          api.get<UserGoals>('/user/goals'),
-          api.get<SummaryResponse>(`/dashboard/summary?date=${today}`),
-          api.get<MealResponse[]>('/meals/recent'),
-          api.get<WeightResponse[]>(`/weight?from=${from}&to=${to}`),
-          api.get<ExerciseResponse[]>(`/exercises?date=${today}`),
-          api.get<HabitSummary>('/habits/summary').catch(() => null)
-        ]);
-        profile = p;
-        goals = g;
-        summary = s;
-        recentMeals = m;
-        weightHistory = w;
-        exercises = ex;
-        habitSummary = hs;
-        userProfile.set(p);
-        userGoals.set(g);
-        api.get<{ tips: string }>('/coach/tips').then(t => { tips = t.tips; }).catch(() => { tips = ''; });
-        api.get<Array<{id: string; name: string; calories: number}>>('/favorites/top').then(f => { quickAddFavorites = f; }).catch(() => {});
-        api.get<FastingStatus>('/fasting/status').then(s => { fastingStatus = s; }).catch(() => {});
-        api.post<HabitSummary>('/habits/checkin', {}).then(r => { if (r) habitSummary = r; }).catch(() => {});
-        checkAchievements();
-      } catch {}
-      finally { loading = false; }
-    }
 
     refreshDashboard();
 
@@ -545,6 +544,73 @@
                        <div class="text-xs text-muted-foreground mt-0.5">{hoursLeft}h {minsLeft}m remaining</div>
                      </div>
                    {/if}
+
+                    <!-- Fasting controls -->
+                    <div class="mt-4 space-y-3">
+                      <div class="flex gap-2">
+                        {#if fastingStatus.is_fasting}
+                          <button
+                            type="button"
+                            onclick={async () => {
+                              if (!fastingStatus) return;
+                              try {
+                                 const result = await api.post<{ message: string; fasting_streak: number }>('/fasting/break');
+                                 fastingStatus = {
+                                   is_fasting: false,
+                                   fasting_streak: result.fasting_streak,
+                                   fast_start_time: null,
+                                   seconds_elapsed: 0,
+                                   seconds_remaining: 0,
+                                   eating_window_start: fastingStatus.eating_window_start,
+                                   eating_window_hours: fastingStatus.eating_window_hours,
+                                   fasting_hours: fastingStatus.fasting_hours,
+                                   fasting_window: fastingStatus.fasting_window
+                                 };
+                              } catch {}
+                            }}
+                            class="flex-1 rounded-xl bg-red-500/15 px-4 py-2.5 text-sm font-semibold text-red-400 hover:bg-red-500/25 transition active:scale-95"
+                          >
+                            Break Fast
+                          </button>
+                        {:else}
+                          <button
+                            type="button"
+                            onclick={async () => {
+                              try {
+                                await api.post('/fasting/start');
+                                fastingStatus = await api.get<FastingStatus>('/fasting/status');
+                              } catch {}
+                            }}
+                            class="flex-1 rounded-xl bg-emerald-500/15 px-4 py-2.5 text-sm font-semibold text-emerald-400 hover:bg-emerald-500/25 transition active:scale-95"
+                          >
+                            Start Fast
+                          </button>
+                        {/if}
+                      </div>
+
+                      <!-- Eating window time configuration -->
+                      <div class="flex items-center gap-2">
+                        <label for="eating-window-start" class="text-xs text-muted-foreground shrink-0">Eating window starts</label>
+                        <input
+                          id="eating-window-start"
+                          type="time"
+                          value={fastingStatus.eating_window_start}
+                          onchange={async (e) => {
+                            if (!fastingStatus) return;
+                            const value = (e.target as HTMLInputElement).value;
+                            if (!value) return;
+                            try {
+                               await api.put('/fasting/window', { eating_window_start: value });
+                               fastingStatus = {
+                                 ...fastingStatus,
+                                 eating_window_start: value
+                               } as FastingStatus;
+                            } catch {}
+                          }}
+                          class="rounded-lg border border-border bg-secondary px-2 py-1.5 text-xs text-foreground focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-ring/20"
+                        />
+                      </div>
+                    </div>
                  {:else}
                    <div class="text-sm text-muted-foreground">Loading...</div>
                  {/if}

@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	defaultRawWindowSize      = 20
-	summaryTargetChars        = 3200
+	defaultRawWindowSize = 20
+	summaryTargetChars   = 3200
 )
 
 // ── DB types ──────────────────────────────────────────────────────────────────
@@ -190,8 +190,14 @@ func (h *Handler) compactIfNeeded(ctx context.Context, userID string) error {
 
 	summaryText, level := h.summarizeMessages(ctx, toSummarize)
 
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
 	var summaryID string
-	err = h.pool.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		INSERT INTO coach_summaries
 			(user_id, summary_text, message_count, covered_from, covered_to)
 		VALUES ($1, $2, $3, $4, $5)
@@ -211,13 +217,17 @@ func (h *Handler) compactIfNeeded(ctx context.Context, userID string) error {
 	for i, m := range toSummarize {
 		ids[i] = m.ID
 	}
-	_, err = h.pool.Exec(ctx, `
+	_, err = tx.Exec(ctx, `
 		UPDATE coach_messages
 		SET covered_by_summary_id = $1
-		WHERE id = ANY($2::text[])
+		WHERE id = ANY($2::uuid[])
 	`, summaryID, ids)
 	if err != nil {
 		return fmt.Errorf("mark messages covered: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit compaction transaction: %w", err)
 	}
 
 	slog.Info("coach: compaction complete",

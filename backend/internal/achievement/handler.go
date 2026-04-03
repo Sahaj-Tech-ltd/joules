@@ -2,6 +2,7 @@ package achievement
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -38,8 +39,12 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, apiResponse{Error: msg})
 }
 
-func getUserID(r *http.Request) string {
-	return r.Context().Value(auth.ContextUserID).(string)
+func getUserID(r *http.Request) (string, error) {
+	userID, ok := r.Context().Value(auth.ContextUserID).(string)
+	if !ok {
+		return "", fmt.Errorf("unauthorized")
+	}
+	return userID, nil
 }
 
 type achievementResponse struct {
@@ -54,7 +59,11 @@ type achievementResponse struct {
 }
 
 func (h *Handler) GetAchievements(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 
 	achievements, err := h.q.GetAchievements(r.Context(), userID)
 	if err != nil {
@@ -81,7 +90,11 @@ func (h *Handler) GetAchievements(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) CheckAchievements(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	now := time.Now()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	yesterday := today.AddDate(0, 0, -1)
@@ -108,7 +121,7 @@ func (h *Handler) CheckAchievements(w http.ResponseWriter, r *http.Request) {
 
 	meals, _ := h.q.GetMealsByDate(ctx, sqlc.GetMealsByDateParams{UserID: userID, Timestamp: today})
 	weights, _ := h.q.GetWeightHistory(ctx, sqlc.GetWeightHistoryParams{UserID: userID, Date: today.AddDate(0, 0, -365), Date_2: today})
-	exercises, _ := h.q.GetExercisesByDate(ctx, sqlc.GetExercisesByDateParams{UserID: userID, Timestamp: today})
+	exercises, _ := h.q.GetExercisesByDate(ctx, sqlc.GetExercisesByDateParams{UserID: userID, Timestamp: today, Column3: "UTC"})
 	water, _ := h.q.GetWaterByDate(ctx, sqlc.GetWaterByDateParams{UserID: userID, Date: today})
 	chatHistory, _ := h.q.GetCoachHistory(ctx, userID)
 	mealsYesterday, _ := h.q.GetMealsByDate(ctx, sqlc.GetMealsByDateParams{UserID: userID, Timestamp: yesterday})

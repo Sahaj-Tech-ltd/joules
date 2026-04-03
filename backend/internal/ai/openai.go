@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 )
 
 type OpenAIClient struct {
@@ -35,9 +36,13 @@ func newOpenAIClient(apiKey, model, visionModel, ocrModel, classifierModel, base
 		ocrModel:        ocrModel,
 		classifierModel: classifierModel,
 		baseURL:         baseURL,
-		httpClient:      &http.Client{},
+		httpClient:      &http.Client{Timeout: 60 * time.Second},
 		prompts:         prompts,
 	}
+}
+
+func (c *OpenAIClient) useMaxCompletion() bool {
+	return strings.Contains(c.baseURL, "openai.com")
 }
 
 type openaiChatMessage struct {
@@ -68,10 +73,28 @@ type openaiToolFunction struct {
 }
 
 type openaiChatRequest struct {
-	Model     string              `json:"model"`
-	MaxTokens int                 `json:"max_tokens"`
-	Messages  []openaiChatMessage `json:"messages"`
-	Tools     []openaiTool        `json:"tools,omitempty"`
+	Model            string              `json:"model"`
+	MaxTokens        int                 `json:"-"`
+	Messages         []openaiChatMessage `json:"messages"`
+	Tools            []openaiTool        `json:"tools,omitempty"`
+	UseMaxCompletion bool                `json:"-"`
+}
+
+func (r openaiChatRequest) MarshalJSON() ([]byte, error) {
+	type Alias openaiChatRequest
+	a := struct {
+		Alias
+		MaxCompTok *int `json:"max_completion_tokens,omitempty"`
+		MaxTok     *int `json:"max_tokens,omitempty"`
+	}{Alias: Alias(r)}
+	if r.MaxTokens > 0 {
+		if r.UseMaxCompletion {
+			a.MaxCompTok = &r.MaxTokens
+		} else {
+			a.MaxTok = &r.MaxTokens
+		}
+	}
+	return json.Marshal(a)
 }
 
 type openaiChatResponse struct {
@@ -93,9 +116,10 @@ func (c *OpenAIClient) Chat(systemPrompt string, messages []ChatMessage) (string
 	}
 
 	reqBody := openaiChatRequest{
-		Model:     c.model,
-		MaxTokens: 1000,
-		Messages:  msgs,
+		Model:            c.model,
+		MaxTokens:        1000,
+		Messages:         msgs,
+		UseMaxCompletion: c.useMaxCompletion(),
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)
@@ -187,10 +211,11 @@ func (c *OpenAIClient) ChatAgent(systemPrompt string, messages []ChatMessage, to
 	}
 
 	reqBody := openaiChatRequest{
-		Model:     c.model,
-		MaxTokens: 2000,
-		Messages:  msgs,
-		Tools:     oaiTools,
+		Model:            c.model,
+		MaxTokens:        2000,
+		Messages:         msgs,
+		Tools:            oaiTools,
+		UseMaxCompletion: c.useMaxCompletion(),
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)
@@ -293,6 +318,7 @@ func (c *OpenAIClient) IdentifyFood(imageData []byte, hint string) ([]Identified
 			{Role: "system", Content: visionPrompt},
 			{Role: "user", Content: userContent},
 		},
+		UseMaxCompletion: c.useMaxCompletion(),
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)
@@ -378,6 +404,7 @@ func (c *OpenAIClient) IdentifyFoodFromText(ocrText, hint string) ([]IdentifiedF
 			{Role: "system", Content: ocrPrompt},
 			{Role: "user", Content: userContent},
 		},
+		UseMaxCompletion: c.useMaxCompletion(),
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)
@@ -451,8 +478,9 @@ func (c *OpenAIClient) ClassifyImage(imageData []byte) (string, error) {
 	}
 
 	reqBody := openaiChatRequest{
-		Model:     c.classifierModel,
-		MaxTokens: 10,
+		Model:            c.classifierModel,
+		MaxTokens:        10,
+		UseMaxCompletion: c.useMaxCompletion(),
 		Messages: []openaiChatMessage{
 			{Role: "system", Content: classifierPrompt},
 			{Role: "user", Content: []any{
@@ -514,8 +542,9 @@ func (c *OpenAIClient) ExtractTextFromImage(imageData []byte) (string, error) {
 	}
 
 	reqBody := openaiChatRequest{
-		Model:     c.ocrModel,
-		MaxTokens: 2000,
+		Model:            c.ocrModel,
+		MaxTokens:        2000,
+		UseMaxCompletion: c.useMaxCompletion(),
 		Messages: []openaiChatMessage{
 			{Role: "system", Content: textExtractPrompt},
 			{Role: "user", Content: []any{

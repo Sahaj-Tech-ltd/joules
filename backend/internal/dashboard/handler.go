@@ -79,8 +79,12 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, apiResponse{Error: msg})
 }
 
-func getUserID(r *http.Request) string {
-	return r.Context().Value(auth.ContextUserID).(string)
+func getUserID(r *http.Request) (string, error) {
+	userID, ok := r.Context().Value(auth.ContextUserID).(string)
+	if !ok {
+		return "", fmt.Errorf("unauthorized")
+	}
+	return userID, nil
 }
 
 func numericToFloat(n pgtype.Numeric) float64 {
@@ -92,7 +96,11 @@ func numericToFloat(n pgtype.Numeric) float64 {
 }
 
 func (h *Handler) GetSummary(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	ctx := r.Context()
 	tz := r.Header.Get("X-Timezone")
 	if tz == "" {
@@ -272,7 +280,11 @@ func (h *Handler) fetchMealsWithFoods(ctx context.Context, userID string, date t
 }
 
 func (h *Handler) MarkCheatDay(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	var req struct {
 		Date string `json:"date"`
 	}
@@ -293,7 +305,11 @@ func (h *Handler) MarkCheatDay(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) UnmarkCheatDay(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	dateStr := r.URL.Query().Get("date")
 	if dateStr == "" {
 		dateStr = time.Now().Format("2006-01-02")

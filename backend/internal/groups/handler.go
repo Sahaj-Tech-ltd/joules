@@ -48,8 +48,12 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, apiResponse{Error: msg})
 }
 
-func getUserID(r *http.Request) string {
-	return r.Context().Value(auth.ContextUserID).(string)
+func getUserID(r *http.Request) (string, error) {
+	userID, ok := r.Context().Value(auth.ContextUserID).(string)
+	if !ok {
+		return "", fmt.Errorf("unauthorized")
+	}
+	return userID, nil
 }
 
 func generateInviteCode() string {
@@ -127,7 +131,11 @@ func rowToGroupItem(g sqlc.GetGroupsByMemberRow) GroupItem {
 }
 
 func (h *Handler) ListMyGroups(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	rows, err := h.q.GetGroupsByMember(r.Context(), userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("list groups: %w", err))
@@ -141,7 +149,11 @@ func (h *Handler) ListMyGroups(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) CreateGroup(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	var req struct {
 		Name        string `json:"name"`
 		Description string `json:"description"`
@@ -208,7 +220,11 @@ func (h *Handler) DiscoverGroups(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) JoinGroup(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	var req struct {
 		InviteCode string `json:"invite_code"`
 		GroupID    string `json:"group_id"` // for public groups
@@ -261,7 +277,11 @@ func (h *Handler) JoinGroup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetGroup(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	groupID := chi.URLParam(r, "id")
 
 	row, err := h.q.GetGroupByID(r.Context(), sqlc.GetGroupByIDParams{ID: groupID, UserID: userID})
@@ -286,21 +306,41 @@ func (h *Handler) GetGroup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) LeaveGroup(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	groupID := chi.URLParam(r, "id")
 	_ = h.q.RemoveGroupMember(r.Context(), sqlc.RemoveGroupMemberParams{GroupID: groupID, UserID: userID})
 	writeJSON(w, http.StatusOK, apiResponse{Data: map[string]bool{"left": true}})
 }
 
 func (h *Handler) DeleteGroup(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	groupID := chi.URLParam(r, "id")
 	_ = h.q.DeleteGroup(r.Context(), sqlc.DeleteGroupParams{ID: groupID, CreatedBy: userID})
 	writeJSON(w, http.StatusOK, apiResponse{Data: map[string]bool{"deleted": true}})
 }
 
 func (h *Handler) GetLeaderboard(w http.ResponseWriter, r *http.Request) {
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	groupID := chi.URLParam(r, "id")
+
+	role, err := h.q.GetUserGroupRole(r.Context(), sqlc.GetUserGroupRoleParams{GroupID: groupID, UserID: userID})
+	if err != nil || role == "" {
+		writeError(w, http.StatusForbidden, errors.New("you are not a member of this group"))
+		return
+	}
+
 	ctx := r.Context()
 
 	rows, err := h.pool.Query(ctx, `
@@ -345,7 +385,19 @@ func (h *Handler) GetLeaderboard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListChallenges(w http.ResponseWriter, r *http.Request) {
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	groupID := chi.URLParam(r, "id")
+
+	role, err := h.q.GetUserGroupRole(r.Context(), sqlc.GetUserGroupRoleParams{GroupID: groupID, UserID: userID})
+	if err != nil || role == "" {
+		writeError(w, http.StatusForbidden, errors.New("you are not a member of this group"))
+		return
+	}
+
 	ctx := r.Context()
 
 	challenges, err := h.q.GetGroupChallenges(ctx, groupID)
@@ -441,7 +493,11 @@ func (h *Handler) getChallengeProgress(ctx context.Context, groupID string, c sq
 }
 
 func (h *Handler) CreateChallenge(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	groupID := chi.URLParam(r, "id")
 
 	// Only admin can create challenges

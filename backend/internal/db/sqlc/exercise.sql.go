@@ -12,17 +12,18 @@ import (
 
 const getExercisesByDate = `-- name: GetExercisesByDate :many
 SELECT id, user_id, timestamp, name, duration_min, calories_burned, created_at FROM exercises
-WHERE user_id = $1 AND timestamp::date = $2
+WHERE user_id = $1 AND (timestamp AT TIME ZONE COALESCE($3::text, 'UTC'))::date = $2
 ORDER BY timestamp
 `
 
 type GetExercisesByDateParams struct {
 	UserID    string    `json:"user_id"`
 	Timestamp time.Time `json:"timestamp"`
+	Column3   string    `json:"column_3"`
 }
 
 func (q *Queries) GetExercisesByDate(ctx context.Context, arg GetExercisesByDateParams) ([]Exercise, error) {
-	rows, err := q.db.Query(ctx, getExercisesByDate, arg.UserID, arg.Timestamp)
+	rows, err := q.db.Query(ctx, getExercisesByDate, arg.UserID, arg.Timestamp, arg.Column3)
 	if err != nil {
 		return nil, err
 	}

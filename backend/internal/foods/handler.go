@@ -23,11 +23,11 @@ import (
 type Handler struct {
 	pool       *pgxpool.Pool
 	httpClient *http.Client
-	aiClient   *ai.ReloadingClient
+	aiClient   ai.Client
 }
 
 // NewHandler creates a new foods Handler.
-func NewHandler(pool *pgxpool.Pool, aiClient *ai.ReloadingClient) *Handler {
+func NewHandler(pool *pgxpool.Pool, aiClient ai.Client) *Handler {
 	return &Handler{
 		pool:       pool,
 		httpClient: &http.Client{Timeout: 10 * time.Second},

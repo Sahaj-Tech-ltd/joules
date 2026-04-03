@@ -1,6 +1,7 @@
 package meal
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -111,6 +113,128 @@ func mealToResponse(m sqlc.Meal, foods []sqlc.FoodItem) MealResponse {
 	return resp
 }
 
+// fetchMealsWithFoodsByDate fetches all meals and their food items for a given day
+// in a single JOIN query instead of N+1 sequential queries.
+func (h *Handler) fetchMealsWithFoodsByDate(ctx context.Context, userID string, date time.Time, tz string) ([]MealResponse, error) {
+	const q = `
+		SELECT
+			m.id, m.timestamp, m.meal_type, m.photo_path, m.note,
+			fi.id, fi.name, fi.calories, fi.protein_g, fi.carbs_g, fi.fat_g, fi.fiber_g, fi.serving_size, fi.source
+		FROM meals m
+		LEFT JOIN food_items fi ON fi.meal_id = m.id
+		WHERE m.user_id = $1 AND (m.timestamp AT TIME ZONE COALESCE($3::text, 'UTC'))::date = $2
+		ORDER BY m.timestamp ASC, fi.id ASC
+	`
+
+	rows, err := h.pool.Query(ctx, q, userID, date, tz)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanMealsWithFoods(rows)
+}
+
+// fetchRecentMealsWithFoods fetches the 20 most recent meals and their food items
+// in a single JOIN query instead of N+1 sequential queries.
+func (h *Handler) fetchRecentMealsWithFoods(ctx context.Context, userID string) ([]MealResponse, error) {
+	const q = `
+		SELECT
+			m.id, m.timestamp, m.meal_type, m.photo_path, m.note,
+			fi.id, fi.name, fi.calories, fi.protein_g, fi.carbs_g, fi.fat_g, fi.fiber_g, fi.serving_size, fi.source
+		FROM (
+			SELECT * FROM meals WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20
+		) m
+		LEFT JOIN food_items fi ON fi.meal_id = m.id
+		ORDER BY m.created_at DESC, fi.id ASC
+	`
+
+	rows, err := h.pool.Query(ctx, q, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanMealsWithFoods(rows)
+}
+
+// scanMealsWithFoods scans JOINed meal+food rows into a []MealResponse,
+// collapsing duplicate meal rows into a single MealResponse with multiple Foods.
+func scanMealsWithFoods(rows pgx.Rows) ([]MealResponse, error) {
+	var order []string
+	mealMap := map[string]*MealResponse{}
+
+	for rows.Next() {
+		var (
+			mID    string
+			mTime  time.Time
+			mType  string
+			mPhoto *string
+			mNote  *string
+			fID    *string
+			fName  *string
+			fCal   *int32
+			fProtG pgtype.Numeric
+			fCarbG pgtype.Numeric
+			fFatG  pgtype.Numeric
+			fFibG  pgtype.Numeric
+			fServ  *string
+			fSrc   *string
+		)
+
+		if err := rows.Scan(
+			&mID, &mTime, &mType, &mPhoto, &mNote,
+			&fID, &fName, &fCal, &fProtG, &fCarbG, &fFatG, &fFibG, &fServ, &fSrc,
+		); err != nil {
+			return nil, err
+		}
+
+		if _, ok := mealMap[mID]; !ok {
+			mealMap[mID] = &MealResponse{
+				ID:        mID,
+				Timestamp: mTime.Format(time.RFC3339),
+				MealType:  mType,
+				PhotoPath: mPhoto,
+				Note:      mNote,
+				Foods:     []FoodItemResponse{},
+			}
+			order = append(order, mID)
+		}
+
+		if fID != nil {
+			cal := int32(0)
+			if fCal != nil {
+				cal = *fCal
+			}
+			src := ""
+			if fSrc != nil {
+				src = *fSrc
+			}
+			mealMap[mID].Foods = append(mealMap[mID].Foods, FoodItemResponse{
+				ID:          *fID,
+				Name:        *fName,
+				Calories:    cal,
+				ProteinG:    numericToFloat(fProtG),
+				CarbsG:      numericToFloat(fCarbG),
+				FatG:        numericToFloat(fFatG),
+				FiberG:      numericToFloat(fFibG),
+				ServingSize: fServ,
+				Source:      src,
+			})
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	result := make([]MealResponse, 0, len(order))
+	for _, id := range order {
+		result = append(result, *mealMap[id])
+	}
+	return result, nil
+}
+
 func (h *Handler) CreateMeal(w http.ResponseWriter, r *http.Request) {
 	var req CreateMealRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -179,7 +303,16 @@ func (h *Handler) CreateMeal(w http.ResponseWriter, r *http.Request) {
 		note = &req.Note
 	}
 
-	meal, err := h.q.CreateMeal(r.Context(), sqlc.CreateMealParams{
+	tx, err := h.pool.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("failed to begin transaction: %w", err))
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	q := h.q.WithTx(tx)
+
+	meal, err := q.CreateMeal(r.Context(), sqlc.CreateMealParams{
 		UserID:    userID,
 		Timestamp: timestamp,
 		MealType:  req.MealType,
@@ -192,7 +325,7 @@ func (h *Handler) CreateMeal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for i := range req.Foods {
-		_, err := h.q.CreateFoodItem(r.Context(), sqlc.CreateFoodItemParams{
+		_, err := q.CreateFoodItem(r.Context(), sqlc.CreateFoodItemParams{
 			MealID:      meal.ID,
 			Name:        req.Foods[i].Name,
 			Calories:    int32(req.Foods[i].Calories),
@@ -210,7 +343,7 @@ func (h *Handler) CreateMeal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for i := range aiFoods {
-		_, err := h.q.CreateFoodItem(r.Context(), sqlc.CreateFoodItemParams{
+		_, err := q.CreateFoodItem(r.Context(), sqlc.CreateFoodItemParams{
 			MealID:      meal.ID,
 			Name:        aiFoods[i].Name,
 			Calories:    int32(aiFoods[i].Calories),
@@ -225,6 +358,11 @@ func (h *Handler) CreateMeal(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, fmt.Errorf("create food item: %w", err))
 			return
 		}
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("failed to commit transaction: %w", err))
+		return
 	}
 
 	foods, err := h.q.GetFoodItemsByMeal(r.Context(), meal.ID)
@@ -284,24 +422,11 @@ func (h *Handler) GetMealsByDate(w http.ResponseWriter, r *http.Request) {
 		date = time.Now()
 	}
 
-	meals, err := h.q.GetMealsByDate(r.Context(), sqlc.GetMealsByDateParams{
-		UserID:    userID,
-		Timestamp: date,
-		Column3:   tz,
-	})
+	// Single JOIN query instead of N+1 sequential queries.
+	mealResponses, err := h.fetchMealsWithFoodsByDate(r.Context(), userID, date, tz)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("get meals: %w", err))
 		return
-	}
-
-	var mealResponses []MealResponse
-	for _, m := range meals {
-		foods, err := h.q.GetFoodItemsByMeal(r.Context(), m.ID)
-		if err != nil {
-			slog.Error("get food items for meal", "meal_id", m.ID, "error", err)
-			continue
-		}
-		mealResponses = append(mealResponses, mealToResponse(m, foods))
 	}
 
 	summary, err := h.q.GetDailySummary(r.Context(), sqlc.GetDailySummaryParams{
@@ -331,20 +456,11 @@ func (h *Handler) GetMealsByDate(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetRecentMeals(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r)
 
-	meals, err := h.q.GetRecentMeals(r.Context(), userID)
+	// Single JOIN query instead of N+1 sequential queries.
+	mealResponses, err := h.fetchRecentMealsWithFoods(r.Context(), userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("get recent meals: %w", err))
 		return
-	}
-
-	var mealResponses []MealResponse
-	for _, m := range meals {
-		foods, err := h.q.GetFoodItemsByMeal(r.Context(), m.ID)
-		if err != nil {
-			slog.Error("get food items for meal", "meal_id", m.ID, "error", err)
-			continue
-		}
-		mealResponses = append(mealResponses, mealToResponse(m, foods))
 	}
 
 	if mealResponses == nil {
@@ -405,6 +521,7 @@ func (h *Handler) UpdateFoodItem(w http.ResponseWriter, r *http.Request) {
 		FiberG:      floatToNumeric(req.FiberG),
 		ServingSize: stringPtr(req.ServingSize),
 		ID:          foodID,
+		UserID:      userID,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("update food item: %w", err))
 		return
@@ -473,7 +590,16 @@ func (h *Handler) CarryForward(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	noteText := "Leftovers from yesterday"
 
-	meal, err := h.q.CreateMeal(ctx, sqlc.CreateMealParams{
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("failed to begin transaction: %w", err))
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	q := h.q.WithTx(tx)
+
+	meal, err := q.CreateMeal(ctx, sqlc.CreateMealParams{
 		UserID:    userID,
 		Timestamp: time.Now(),
 		MealType:  req.MealType,
@@ -486,7 +612,7 @@ func (h *Handler) CarryForward(w http.ResponseWriter, r *http.Request) {
 
 	var createdFoods []sqlc.FoodItem
 	for _, f := range req.Foods {
-		fi, err := h.q.CreateFoodItem(ctx, sqlc.CreateFoodItemParams{
+		fi, err := q.CreateFoodItem(ctx, sqlc.CreateFoodItemParams{
 			MealID:      meal.ID,
 			Name:        f.Name,
 			Calories:    int32(f.Calories),
@@ -498,20 +624,25 @@ func (h *Handler) CarryForward(w http.ResponseWriter, r *http.Request) {
 			Source:      "leftover",
 		})
 		if err != nil {
-			slog.Warn("carry-forward: create food item failed", "error", err)
-			continue
+			writeError(w, http.StatusInternalServerError, fmt.Errorf("create food item: %w", err))
+			return
 		}
 		createdFoods = append(createdFoods, fi)
 
 		// Optionally remove the original from yesterday
 		if req.RemoveFromYesterday && f.OriginalFoodID != "" {
-			if err := h.q.DeleteFoodItemByUser(ctx, sqlc.DeleteFoodItemByUserParams{
+			if err := q.DeleteFoodItemByUser(ctx, sqlc.DeleteFoodItemByUserParams{
 				ID:     f.OriginalFoodID,
 				UserID: userID,
 			}); err != nil {
 				slog.Warn("carry-forward: could not remove original", "food_id", f.OriginalFoodID, "error", err)
 			}
 		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("failed to commit transaction: %w", err))
+		return
 	}
 
 	writeJSON(w, http.StatusCreated, apiResponse{Data: mealToResponse(meal, createdFoods)})
@@ -604,7 +735,17 @@ func (h *Handler) LogMealFromRecipe(w http.ResponseWriter, r *http.Request) {
 
 	// Create the meal
 	noteText := fmt.Sprintf("From recipe: %s", recipeName)
-	meal, err := h.q.CreateMeal(ctx, sqlc.CreateMealParams{
+
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("failed to begin transaction: %w", err))
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	q := h.q.WithTx(tx)
+
+	meal, err := q.CreateMeal(ctx, sqlc.CreateMealParams{
 		UserID:    userID,
 		Timestamp: time.Now(),
 		MealType:  req.MealType,
@@ -618,7 +759,7 @@ func (h *Handler) LogMealFromRecipe(w http.ResponseWriter, r *http.Request) {
 	// Create food items from recipe
 	var createdFoods []sqlc.FoodItem
 	for _, f := range recipeFoods {
-		fi, err := h.q.CreateFoodItem(ctx, sqlc.CreateFoodItemParams{
+		fi, err := q.CreateFoodItem(ctx, sqlc.CreateFoodItemParams{
 			MealID:      meal.ID,
 			Name:        f.name,
 			Calories:    f.calories,
@@ -630,10 +771,15 @@ func (h *Handler) LogMealFromRecipe(w http.ResponseWriter, r *http.Request) {
 			Source:      "recipe",
 		})
 		if err != nil {
-			slog.Warn("from-recipe: create food item failed", "error", err)
-			continue
+			writeError(w, http.StatusInternalServerError, fmt.Errorf("create food item: %w", err))
+			return
 		}
 		createdFoods = append(createdFoods, fi)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("failed to commit transaction: %w", err))
+		return
 	}
 
 	writeJSON(w, http.StatusCreated, apiResponse{Data: mealToResponse(meal, createdFoods)})

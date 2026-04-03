@@ -23,7 +23,7 @@ func (q *Queries) CompleteOnboarding(ctx context.Context, userID string) error {
 const createProfile = `-- name: CreateProfile :one
 INSERT INTO user_profiles (user_id, name, age, sex, height_cm, weight_kg, target_weight_kg, activity_level, onboarding_complete)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING user_id, name, age, sex, height_cm, weight_kg, target_weight_kg, activity_level, onboarding_complete, created_at, updated_at
+RETURNING user_id, name, age, sex, height_cm, weight_kg, target_weight_kg, activity_level, avatar_url, coach_notes, onboarding_complete, created_at, updated_at
 `
 
 type CreateProfileParams struct {
@@ -60,6 +60,8 @@ func (q *Queries) CreateProfile(ctx context.Context, arg CreateProfileParams) (U
 		&i.WeightKg,
 		&i.TargetWeightKg,
 		&i.ActivityLevel,
+		&i.AvatarUrl,
+		&i.CoachNotes,
 		&i.OnboardingComplete,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -68,7 +70,7 @@ func (q *Queries) CreateProfile(ctx context.Context, arg CreateProfileParams) (U
 }
 
 const getProfile = `-- name: GetProfile :one
-SELECT user_id, name, age, sex, height_cm, weight_kg, target_weight_kg, activity_level, onboarding_complete, created_at, updated_at FROM user_profiles WHERE user_id = $1 LIMIT 1
+SELECT user_id, name, age, sex, height_cm, weight_kg, target_weight_kg, activity_level, avatar_url, coach_notes, onboarding_complete, created_at, updated_at FROM user_profiles WHERE user_id = $1 LIMIT 1
 `
 
 func (q *Queries) GetProfile(ctx context.Context, userID string) (UserProfile, error) {
@@ -83,6 +85,8 @@ func (q *Queries) GetProfile(ctx context.Context, userID string) (UserProfile, e
 		&i.WeightKg,
 		&i.TargetWeightKg,
 		&i.ActivityLevel,
+		&i.AvatarUrl,
+		&i.CoachNotes,
 		&i.OnboardingComplete,
 		&i.CreatedAt,
 		&i.UpdatedAt,

@@ -60,12 +60,20 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, apiResponse{Error: msg})
 }
 
-func getUserID(r *http.Request) string {
-	return r.Context().Value(auth.ContextUserID).(string)
+func getUserID(r *http.Request) (string, error) {
+	userID, ok := r.Context().Value(auth.ContextUserID).(string)
+	if !ok {
+		return "", fmt.Errorf("unauthorized")
+	}
+	return userID, nil
 }
 
 func (h *Handler) GetSteps(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	dateStr := r.URL.Query().Get("date")
 
 	var date time.Time
@@ -101,7 +109,11 @@ func (h *Handler) GetSteps(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) LogSteps(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 
 	var req struct {
 		StepCount int32  `json:"step_count"`
@@ -148,7 +160,11 @@ func (h *Handler) LogSteps(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetStepsHistory(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 
 	fromStr := r.URL.Query().Get("from")
 	toStr := r.URL.Query().Get("to")
@@ -196,10 +212,14 @@ func (h *Handler) GetStepsHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GoogleStatus(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 
 	var exists bool
-	err := h.pool.QueryRow(r.Context(),
+	err = h.pool.QueryRow(r.Context(),
 		"SELECT EXISTS(SELECT 1 FROM google_fit_tokens WHERE user_id = $1)",
 		userID,
 	).Scan(&exists)
@@ -212,7 +232,11 @@ func (h *Handler) GoogleStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GoogleConnect(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 
 	state := h.signState(userID)
 
@@ -274,7 +298,11 @@ func (h *Handler) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GoogleSync(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	ctx := r.Context()
 
 	token, err := h.loadToken(ctx, userID)

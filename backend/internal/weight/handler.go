@@ -54,8 +54,12 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, apiResponse{Error: msg})
 }
 
-func getUserID(r *http.Request) string {
-	return r.Context().Value(auth.ContextUserID).(string)
+func getUserID(r *http.Request) (string, error) {
+	userID, ok := r.Context().Value(auth.ContextUserID).(string)
+	if !ok {
+		return "", fmt.Errorf("unauthorized")
+	}
+	return userID, nil
 }
 
 func floatToNumeric(f float64) pgtype.Numeric {
@@ -103,7 +107,11 @@ func (h *Handler) LogWeight(w http.ResponseWriter, r *http.Request) {
 		date = tzNow(r.Header.Get("X-Timezone"))
 	}
 
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 
 	logged, err := h.q.LogWeight(r.Context(), sqlc.LogWeightParams{
 		UserID:   userID,
@@ -127,7 +135,11 @@ func (h *Handler) LogWeight(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetWeightHistory(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 
 	fromStr := r.URL.Query().Get("from")
 	toStr := r.URL.Query().Get("to")

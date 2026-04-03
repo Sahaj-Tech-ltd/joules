@@ -44,8 +44,12 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, apiResponse{Error: msg})
 }
 
-func getUserID(r *http.Request) string {
-	return r.Context().Value(auth.ContextUserID).(string)
+func getUserID(r *http.Request) (string, error) {
+	userID, ok := r.Context().Value(auth.ContextUserID).(string)
+	if !ok {
+		return "", fmt.Errorf("unauthorized")
+	}
+	return userID, nil
 }
 
 func floatToNumeric(f float64) pgtype.Numeric {
@@ -102,7 +106,11 @@ func toResponse(f sqlc.FoodFavorite) favoriteResponse {
 }
 
 func (h *Handler) AddFavorite(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	var req favoriteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -137,7 +145,11 @@ func (h *Handler) AddFavorite(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) RemoveFavorite(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 
 	if err := h.q.RemoveFoodFavorite(r.Context(), sqlc.RemoveFoodFavoriteParams{
 		ID:     id,
@@ -151,7 +163,11 @@ func (h *Handler) RemoveFavorite(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetFavorites(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 
 	favs, err := h.q.GetFoodFavorites(r.Context(), userID)
 	if err != nil {
@@ -168,7 +184,11 @@ func (h *Handler) GetFavorites(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetTopFavorites(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	limit := int32(5)
 
 	favs, err := h.q.GetTopFavorites(r.Context(), sqlc.GetTopFavoritesParams{
@@ -190,7 +210,11 @@ func (h *Handler) GetTopFavorites(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) LogFromFavorite(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 
 	_ = h.q.IncrementFavoriteUseCount(r.Context(), sqlc.IncrementFavoriteUseCountParams{
 		ID:     id,

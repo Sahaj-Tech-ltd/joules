@@ -26,6 +26,39 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   });
 
   if (res.status === 401) {
+    // Attempt token refresh before giving up
+    try {
+      const refreshed = await fetch(`${API_BASE}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include'
+      });
+      if (refreshed.ok) {
+        const refreshData = await refreshed.json();
+        if (refreshData.data?.access_token) {
+          authToken.set(refreshData.data.access_token);
+          // Retry the original request with new token
+          headers['Authorization'] = `Bearer ${refreshData.data.access_token}`;
+          const retryRes = await fetch(`${API_BASE}${path}`, {
+            ...options,
+            headers,
+            credentials: 'include'
+          });
+          if (retryRes.ok) {
+            if (retryRes.status === 204 || retryRes.headers.get('content-length') === '0') {
+              return undefined as T;
+            }
+            const retryContentType = retryRes.headers.get('content-type') || '';
+            if (!retryContentType.includes('application/json')) {
+              return await retryRes.text() as unknown as T;
+            }
+            const retryData = await retryRes.json();
+            return retryData.data;
+          }
+        }
+      }
+    } catch {}
+    // Refresh failed — redirect to login
     authToken.set(null);
     window.location.href = '/login';
     throw new Error('Unauthorized');

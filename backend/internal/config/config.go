@@ -37,6 +37,13 @@ type Config struct {
 	RequireApproval    bool
 	GoogleClientID     string
 	GoogleClientSecret string
+
+	VisionAPIKey      string
+	VisionBaseURL     string
+	OCRAPIKey         string
+	OCRBaseURL        string
+	ClassifierAPIKey  string
+	ClassifierBaseURL string
 }
 
 func Load() (*Config, error) {
@@ -69,6 +76,13 @@ func Load() (*Config, error) {
 		RequireApproval:    os.Getenv("REQUIRE_APPROVAL") == "true",
 		GoogleClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
 		GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
+
+		VisionAPIKey:      os.Getenv("VISION_API_KEY"),
+		VisionBaseURL:     os.Getenv("VISION_BASE_URL"),
+		OCRAPIKey:         os.Getenv("OCR_API_KEY"),
+		OCRBaseURL:        os.Getenv("OCR_BASE_URL"),
+		ClassifierAPIKey:  os.Getenv("CLASSIFIER_API_KEY"),
+		ClassifierBaseURL: os.Getenv("CLASSIFIER_BASE_URL"),
 	}
 
 	smtpPort := getEnv("SMTP_PORT", "587")

@@ -56,8 +56,12 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, apiResponse{Error: msg})
 }
 
-func getUserID(r *http.Request) string {
-	return r.Context().Value(auth.ContextUserID).(string)
+func getUserID(r *http.Request) (string, error) {
+	userID, ok := r.Context().Value(auth.ContextUserID).(string)
+	if !ok {
+		return "", fmt.Errorf("unauthorized")
+	}
+	return userID, nil
 }
 
 func floatToNumeric(f float64) pgtype.Numeric {
@@ -106,7 +110,11 @@ func (h *Handler) CompleteOnboarding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 
 	tdeeCfg := admin.GetTDEEConfig(h.pool, r.Context())
 
@@ -115,7 +123,7 @@ func (h *Handler) CompleteOnboarding(w http.ResponseWriter, r *http.Request) {
 		req.ActivityLevel, req.Objective, req.DietPlan, tdeeCfg,
 	)
 
-	_, err := h.q.CreateProfile(r.Context(), sqlc.CreateProfileParams{
+	_, err = h.q.CreateProfile(r.Context(), sqlc.CreateProfileParams{
 		UserID:             userID,
 		Name:               req.Name,
 		Age:                intPtr(req.Age),
@@ -185,7 +193,11 @@ func (h *Handler) getAvatarURL(r *http.Request, userID string) *string {
 }
 
 func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 
 	profile, err := h.q.GetProfile(r.Context(), userID)
 	if err != nil {
@@ -222,9 +234,13 @@ func (h *Handler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 
-	err := h.q.UpdateProfile(r.Context(), sqlc.UpdateProfileParams{
+	err = h.q.UpdateProfile(r.Context(), sqlc.UpdateProfileParams{
 		UserID:         userID,
 		Name:           req.Name,
 		Age:            intPtr(req.Age),
@@ -305,7 +321,11 @@ func (h *Handler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) UploadAvatar(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 
 	if err := r.ParseMultipartForm(5 << 20); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("file too large or invalid form: %w", err))
@@ -369,7 +389,11 @@ func (h *Handler) UploadAvatar(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetGoals(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 
 	goals, err := h.q.GetGoals(r.Context(), userID)
 	if err != nil {
@@ -406,7 +430,11 @@ func (h *Handler) UpdateGoals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	ctx := r.Context()
 
 	var calTarget, proteinG, carbsG, fatG int32
@@ -501,9 +529,13 @@ type PreferencesResponse struct {
 }
 
 func (h *Handler) GetPreferences(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	var prefs PreferencesResponse
-	err := h.pool.QueryRow(r.Context(),
+	err = h.pool.QueryRow(r.Context(),
 		"SELECT diet_type, allergies, food_notes, eating_context, height_unit, weight_unit, energy_unit FROM user_preferences WHERE user_id = $1",
 		userID,
 	).Scan(&prefs.DietType, &prefs.Allergies, &prefs.FoodNotes, &prefs.EatingContext, &prefs.HeightUnit, &prefs.WeightUnit, &prefs.EnergyUnit)
@@ -518,7 +550,11 @@ func (h *Handler) GetPreferences(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) UpdatePreferences(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	var req PreferencesRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -536,7 +572,7 @@ func (h *Handler) UpdatePreferences(w http.ResponseWriter, r *http.Request) {
 	if req.EnergyUnit == "" {
 		req.EnergyUnit = "kcal"
 	}
-	_, err := h.pool.Exec(r.Context(),
+	_, err = h.pool.Exec(r.Context(),
 		`INSERT INTO user_preferences (user_id, diet_type, allergies, food_notes, eating_context, height_unit, weight_unit, energy_unit)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		 ON CONFLICT (user_id) DO UPDATE SET
@@ -611,9 +647,13 @@ func validateUpdateProfile(req *UpdateProfileRequest) error {
 }
 
 func (h *Handler) GetCoachNotes(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	var notes string
-	err := h.pool.QueryRow(r.Context(),
+	err = h.pool.QueryRow(r.Context(),
 		"SELECT COALESCE(coach_notes, '') FROM user_profiles WHERE user_id = $1", userID,
 	).Scan(&notes)
 	if err != nil {
@@ -624,7 +664,11 @@ func (h *Handler) GetCoachNotes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) UpdateCoachNotes(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	var req struct {
 		Notes string `json:"notes"`
 	}
@@ -636,7 +680,7 @@ func (h *Handler) UpdateCoachNotes(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("notes must be 10000 characters or less"))
 		return
 	}
-	_, err := h.pool.Exec(r.Context(),
+	_, err = h.pool.Exec(r.Context(),
 		"UPDATE user_profiles SET coach_notes = $1 WHERE user_id = $2", req.Notes, userID,
 	)
 	if err != nil {
@@ -647,7 +691,11 @@ func (h *Handler) UpdateCoachNotes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetCoachMemories(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	rows, err := h.pool.Query(r.Context(),
 		"SELECT id, category, content, source, created_at, updated_at FROM coach_memory WHERE user_id = $1 ORDER BY category, created_at DESC",
 		userID,
@@ -684,7 +732,11 @@ func (h *Handler) GetCoachMemories(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) DeleteCoachMemory(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	memoryID := chi.URLParam(r, "id")
 	if memoryID == "" {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("memory id required"))

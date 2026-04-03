@@ -58,8 +58,12 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, apiResponse{Error: msg})
 }
 
-func getUserID(r *http.Request) string {
-	return r.Context().Value(auth.ContextUserID).(string)
+func getUserID(r *http.Request) (string, error) {
+	userID, ok := r.Context().Value(auth.ContextUserID).(string)
+	if !ok {
+		return "", fmt.Errorf("unauthorized")
+	}
+	return userID, nil
 }
 
 func tzNow(tz string) time.Time {
@@ -98,7 +102,11 @@ func (h *Handler) LogExercise(w http.ResponseWriter, r *http.Request) {
 		timestamp = tzNow(r.Header.Get("X-Timezone"))
 	}
 
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 
 	weightKg := req.WeightKg
 	if weightKg == 0 {
@@ -138,7 +146,16 @@ func (h *Handler) LogExercise(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetExercisesByDate(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
+
+	tz := r.Header.Get("X-Timezone")
+	if tz == "" {
+		tz = "UTC"
+	}
 
 	dateStr := r.URL.Query().Get("date")
 
@@ -151,12 +168,13 @@ func (h *Handler) GetExercisesByDate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		date = tzNow(r.Header.Get("X-Timezone"))
+		date = tzNow(tz)
 	}
 
 	exercises, err := h.q.GetExercisesByDate(r.Context(), sqlc.GetExercisesByDateParams{
 		UserID:    userID,
 		Timestamp: date,
+		Column3:   tz,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("get exercises: %w", err))

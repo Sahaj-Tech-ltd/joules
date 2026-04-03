@@ -60,8 +60,12 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, apiResponse{Error: msg})
 }
 
-func getUserID(r *http.Request) string {
-	return r.Context().Value(auth.ContextUserID).(string)
+func getUserID(r *http.Request) (string, error) {
+	userID, ok := r.Context().Value(auth.ContextUserID).(string)
+	if !ok {
+		return "", fmt.Errorf("unauthorized")
+	}
+	return userID, nil
 }
 
 func numericToFloat(n pgtype.Numeric) float64 {
@@ -321,7 +325,11 @@ func defaultTips(profile sqlc.UserProfile, goals sqlc.UserGoal) string {
 }
 
 func (h *Handler) GetTips(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	today := time.Now().Format("2006-01-02")
 	cacheKey := userID + ":" + today
 
@@ -425,7 +433,11 @@ func (h *Handler) GetTips(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetChatHistory(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 
 	messages, err := h.q.GetCoachHistory(r.Context(), userID)
 	if err != nil {
@@ -1424,10 +1436,20 @@ func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	ctx := r.Context()
 
-	_, err := h.q.SaveCoachMessage(ctx, sqlc.SaveCoachMessageParams{
+	// If no AI client configured, return early to avoid nil pointer dereference
+	if h.ai == nil {
+		writeError(w, http.StatusServiceUnavailable, errors.New("AI coach is not configured"))
+		return
+	}
+
+	_, err = h.q.SaveCoachMessage(ctx, sqlc.SaveCoachMessageParams{
 		UserID:  userID,
 		Role:    "user",
 		Content: req.Content,
