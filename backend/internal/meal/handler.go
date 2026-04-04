@@ -25,6 +25,14 @@ import (
 	syslog "joules/internal/syslog"
 )
 
+type foodMemoryMatch struct {
+	Calories float32
+	Protein  float32
+	Carbs    float32
+	Fat      float32
+	Fiber    float32
+}
+
 type Handler struct {
 	q         *sqlc.Queries
 	ai        ai.Client
@@ -35,6 +43,29 @@ type Handler struct {
 
 func NewHandler(q *sqlc.Queries, aiClient ai.Client, uploadDir string, cfg *config.Config, pool *pgxpool.Pool) *Handler {
 	return &Handler{q: q, ai: aiClient, uploadDir: uploadDir, cfg: cfg, pool: pool}
+}
+
+func (h *Handler) lookupFoodMemory(userID, foodName string) *foodMemoryMatch {
+	var m foodMemoryMatch
+	err := h.pool.QueryRow(context.Background(),
+		`SELECT calories, protein, carbs, fat, fiber FROM user_food_memory
+		 WHERE user_id = $1 AND (food_name ILIKE $2 OR canonical_name ILIKE $2)
+		 AND correction_count >= 3 ORDER BY correction_count DESC LIMIT 1`,
+		userID, "%"+foodName+"%").Scan(&m.Calories, &m.Protein, &m.Carbs, &m.Fat, &m.Fiber)
+	if err != nil {
+		return nil
+	}
+	return &m
+}
+
+func (h *Handler) upsertFoodMemory(userID, foodName string, calories, protein, carbs, fat, fiber float64) {
+	h.pool.Exec(context.Background(),
+		`INSERT INTO user_food_memory (user_id, food_name, calories, protein, carbs, fat, fiber, correction_count)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, 1)
+		 ON CONFLICT (user_id, food_name) DO UPDATE
+		 SET calories = $3, protein = $4, carbs = $5, fat = $6, fiber = $7,
+		     correction_count = user_food_memory.correction_count + 1, updated_at = NOW()`,
+		userID, foodName, calories, protein, carbs, fat, fiber)
 }
 
 type apiResponse struct {
@@ -386,6 +417,15 @@ func (h *Handler) CreateMeal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for i := range aiFoods {
+		source := "ai"
+		if mem := h.lookupFoodMemory(userID, aiFoods[i].Name); mem != nil {
+			aiFoods[i].Calories = float64(mem.Calories)
+			aiFoods[i].ProteinG = float64(mem.Protein)
+			aiFoods[i].CarbsG = float64(mem.Carbs)
+			aiFoods[i].FatG = float64(mem.Fat)
+			aiFoods[i].FiberG = float64(mem.Fiber)
+			source = "food_memory"
+		}
 		_, err := q.CreateFoodItem(r.Context(), sqlc.CreateFoodItemParams{
 			MealID:      meal.ID,
 			Name:        aiFoods[i].Name,
@@ -395,7 +435,7 @@ func (h *Handler) CreateMeal(w http.ResponseWriter, r *http.Request) {
 			FatG:        floatToNumeric(aiFoods[i].FatG),
 			FiberG:      floatToNumeric(aiFoods[i].FiberG),
 			ServingSize: stringPtr(aiFoods[i].ServingSize),
-			Source:      "ai",
+			Source:      source,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, fmt.Errorf("create food item: %w", err))
@@ -585,6 +625,8 @@ func (h *Handler) UpdateFoodItem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("update food item: %w", err))
 		return
 	}
+
+	h.upsertFoodMemory(userID, req.Name, req.Calories, req.ProteinG, req.CarbsG, req.FatG, req.FiberG)
 
 	foods, err := h.q.GetFoodItemsByMeal(r.Context(), mealID)
 	if err != nil {

@@ -192,6 +192,7 @@ func main() {
 
 	r.Route("/api", func(r chi.Router) {
 		r.Use(maxBodySize(10 << 20))
+		r.Use(auth.PlanMiddleware(pool))
 		// Public banner endpoint — no auth required
 		r.Get("/banners", adminHandler.GetBanners)
 		r.Get("/features", adminHandler.GetPublicFeatures)

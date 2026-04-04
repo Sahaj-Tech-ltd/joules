@@ -159,6 +159,9 @@ func (s *Service) Signup(email, password string) (*SignupResponse, error) {
 		return nil, fmt.Errorf("create user: %w", err)
 	}
 
+	s.pool.Exec(context.Background(),
+		`UPDATE users SET trial_started_at = NOW(), plan = 'free' WHERE id = $1`, user.ID)
+
 	smtpHost, _, _, _ := s.effectiveSMTP()
 	if smtpHost != "" {
 		if err := s.sendVerificationEmail(email, code); err != nil {

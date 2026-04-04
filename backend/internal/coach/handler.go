@@ -1466,10 +1466,21 @@ func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 
-	// If no AI client configured, return early to avoid nil pointer dereference
 	if h.ai == nil {
 		writeError(w, http.StatusServiceUnavailable, errors.New("AI coach is not configured"))
 		return
+	}
+
+	plan := auth.GetPlan(ctx)
+	if plan == "free" {
+		var msgCount int
+		_ = h.pool.QueryRow(ctx,
+			`SELECT COUNT(*)::int FROM coach_messages WHERE user_id = $1 AND role = 'user' AND created_at::date = CURRENT_DATE`,
+			userID).Scan(&msgCount)
+		if msgCount > 5 {
+			writeError(w, http.StatusTooManyRequests, errors.New("You've reached your daily coach limit. Upgrade to Premium for unlimited conversations."))
+			return
+		}
 	}
 
 	_, err = h.q.SaveCoachMessage(ctx, sqlc.SaveCoachMessageParams{
@@ -1519,6 +1530,12 @@ func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	).Scan(&coachNotes)
 
 	coachPrompt := admin.GetSettingDefault(h.pool, ctx, "prompt_coach", admin.DefaultPrompts["prompt_coach"])
+
+	var identityAspiration string
+	h.pool.QueryRow(ctx,
+		`SELECT COALESCE(identity_aspiration, '') FROM user_profiles WHERE user_id = $1`, userID,
+	).Scan(&identityAspiration)
+
 	systemPrompt := fmt.Sprintf(
 		coachPrompt,
 		profile.Name,
@@ -1528,6 +1545,10 @@ func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		memoryCtx.String(),
 		coachNotes,
 	)
+
+	if identityAspiration != "" {
+		systemPrompt += fmt.Sprintf("\n\nUser's Identity Aspiration: %s", identityAspiration)
+	}
 
 	tools := h.agentTools()
 
