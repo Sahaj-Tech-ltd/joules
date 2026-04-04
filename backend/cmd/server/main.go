@@ -40,6 +40,7 @@ import (
 	"joules/internal/meal"
 	"joules/internal/notify"
 	"joules/internal/recipe"
+	"joules/internal/scheduler"
 	"joules/internal/steps"
 	syslog "joules/internal/syslog"
 	"joules/internal/user"
@@ -175,6 +176,14 @@ func main() {
 	schedCtx, schedCancel := context.WithCancel(context.Background())
 	defer schedCancel()
 	go notifySvc.StartScheduler(schedCtx)
+
+	// Start behavioral science scheduled jobs
+	behavSched := scheduler.New(pool, aiClient, notifySvc)
+	behavSched.AddJob("@daily", scheduler.UpdateHabitPhases)
+	behavSched.AddJob("@daily", scheduler.ComputeBehavioralPatterns)
+	behavSched.AddJob("@daily", scheduler.GenerateIdentityQuotes)
+	behavSched.AddJob("@daily", scheduler.DetectFreshStarts)
+	go behavSched.Start(schedCtx)
 
 	r := chi.NewRouter()
 

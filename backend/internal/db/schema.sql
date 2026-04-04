@@ -454,6 +454,22 @@ CREATE TABLE IF NOT EXISTS expo_push_tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_expo_push_tokens_user ON expo_push_tokens(user_id);
 
+-- Behavioral insights (computed nightly by scheduler)
+CREATE TABLE IF NOT EXISTS behavioral_insights (
+    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    patterns JSONB NOT NULL DEFAULT '{}',
+    computed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Notification deduplication log (used by fresh-start scheduler)
+CREATE TABLE IF NOT EXISTS notification_log (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    tag TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_notification_log_user_tag ON notification_log(user_id, tag, created_at);
+
 -- Plan-tier model overrides
 INSERT INTO app_settings (key, value) VALUES ('model_vision_free', '') ON CONFLICT (key) DO NOTHING;
 INSERT INTO app_settings (key, value) VALUES ('model_primary_free', '') ON CONFLICT (key) DO NOTHING;
