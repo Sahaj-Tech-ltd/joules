@@ -8,14 +8,14 @@ function getColors(scheme: string) {
   return light;
 }
 
-export default function HomeScreen() {
+export default function ProgressScreen() {
   const colorScheme = useColorScheme() ?? 'dark';
   const colors = getColors(colorScheme);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Text style={[styles.title, { color: colors.textPrimary }]}>Home</Text>
-      <Text style={[styles.subtitle, { color: colors.textSecondary }]}>Your dashboard will appear here</Text>
+      <Text style={[styles.title, { color: colors.textPrimary }]}>Progress</Text>
+      <Text style={[styles.subtitle, { color: colors.textSecondary }]}>Your progress charts will appear here</Text>
     </View>
   );
 }
@@ -24,10 +24,10 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     paddingHorizontal: spacing.lg,
-    paddingTop: 60,
+    paddingTop: 16,
   },
   title: {
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: '700',
   },
   subtitle: {
