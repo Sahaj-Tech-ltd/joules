@@ -60,3 +60,7 @@ export function searchFoods(query: string, limit?: number): Promise<FoodSearchRe
   if (limit) params.set('limit', String(limit));
   return api.get<FoodSearchResult[]>(`/foods/search?${params.toString()}`);
 }
+
+export function lookupBarcode(upc: string): Promise<FoodSearchResult> {
+  return api.get<FoodSearchResult>(`/foods/barcode/${encodeURIComponent(upc)}`);
+}
