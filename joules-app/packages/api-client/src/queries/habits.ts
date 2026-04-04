@@ -6,10 +6,21 @@ export interface HabitSummary {
   streak: number;
   longest_streak: number;
   consistency_percentage: number;
+  total_points: number;
+  level: number;
+  level_name: string;
+  streak_days: number;
+  pet_mood: string;
+  today_points: number;
+  today_checked_in: boolean;
 }
 
 export function fetchHabitSummary(): Promise<HabitSummary> {
   return api.get<HabitSummary>('/habits/summary');
+}
+
+export function fetchHabitPhase(): Promise<HabitPhase> {
+  return api.get<HabitPhase>('/habits/phase');
 }
 
 export function habitCheckin(date?: string): Promise<void> {

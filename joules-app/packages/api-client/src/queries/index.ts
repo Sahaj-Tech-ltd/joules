@@ -13,3 +13,4 @@ export * from './steps';
 export * from './notifications';
 export * from './fasting';
 export * from './habits';
+export * from './identity';
