@@ -123,7 +123,15 @@ func (h *Handler) CompleteOnboarding(w http.ResponseWriter, r *http.Request) {
 		req.ActivityLevel, req.Objective, req.DietPlan, tdeeCfg,
 	)
 
-	_, err = h.q.CreateProfile(r.Context(), sqlc.CreateProfileParams{
+	tx, txErr := h.pool.Begin(r.Context())
+	if txErr != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("begin transaction: %w", txErr))
+		return
+	}
+	defer tx.Rollback(r.Context())
+	q := h.q.WithTx(tx)
+
+	_, err = q.CreateProfile(r.Context(), sqlc.CreateProfileParams{
 		UserID:             userID,
 		Name:               req.Name,
 		Age:                intPtr(req.Age),
@@ -139,7 +147,7 @@ func (h *Handler) CompleteOnboarding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = h.q.CreateGoals(r.Context(), sqlc.CreateGoalsParams{
+	_, err = q.CreateGoals(r.Context(), sqlc.CreateGoalsParams{
 		UserID:             userID,
 		Objective:          req.Objective,
 		DietPlan:           req.DietPlan,
@@ -163,15 +171,20 @@ func (h *Handler) CompleteOnboarding(w http.ResponseWriter, r *http.Request) {
 				Microseconds: int64(hh)*3600_000_000 + int64(mm)*60_000_000,
 				Valid:        true,
 			}
-			_ = h.q.UpdateEatingWindow(r.Context(), sqlc.UpdateEatingWindowParams{
+			_ = q.UpdateEatingWindow(r.Context(), sqlc.UpdateEatingWindowParams{
 				UserID:            userID,
 				EatingWindowStart: pgTime,
 			})
 		}
 	}
 
-	if err := h.q.CompleteOnboarding(r.Context(), userID); err != nil {
+	if err := q.CompleteOnboarding(r.Context(), userID); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("complete onboarding: %w", err))
+		return
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("commit onboarding: %w", err))
 		return
 	}
 

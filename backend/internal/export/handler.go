@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"joules/internal/auth"
@@ -15,11 +16,12 @@ import (
 )
 
 type Handler struct {
-	q *sqlc.Queries
+	q    *sqlc.Queries
+	pool *pgxpool.Pool
 }
 
-func NewHandler(q *sqlc.Queries) *Handler {
-	return &Handler{q: q}
+func NewHandler(q *sqlc.Queries, pool *pgxpool.Pool) *Handler {
+	return &Handler{q: q, pool: pool}
 }
 
 func getUserID(r *http.Request) (string, error) {
@@ -99,43 +101,73 @@ func (h *Handler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 
 	case "water":
 		cw.Write([]string{"Date", "Water (ml)"})
-		for d := fromDate; !d.After(toDate); d = d.AddDate(0, 0, 1) {
-			total, err := h.q.GetWaterByDate(ctx, sqlc.GetWaterByDateParams{UserID: userID, Date: d})
-			if err != nil {
-				continue
+		rows, wErr := h.pool.Query(ctx,
+			`SELECT date, COALESCE(SUM(amount_ml),0)::bigint as total FROM water_logs
+			 WHERE user_id = $1 AND date BETWEEN $2 AND $3
+			 GROUP BY date ORDER BY date`, userID, fromDate, toDate)
+		if wErr == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var d time.Time
+				var total int64
+				if rows.Scan(&d, &total) == nil {
+					cw.Write([]string{d.Format("2006-01-02"), fmt.Sprintf("%d", total)})
+				}
 			}
-			cw.Write([]string{d.Format("2006-01-02"), fmt.Sprintf("%d", total)})
 		}
 
 	case "exercise":
 		cw.Write([]string{"Date", "Name", "Duration (min)", "Calories Burned"})
-		for d := fromDate; !d.After(toDate); d = d.AddDate(0, 0, 1) {
-			exercises, err := h.q.GetExercisesByDate(ctx, sqlc.GetExercisesByDateParams{UserID: userID, Timestamp: d, Column3: "UTC"})
-			if err != nil {
-				continue
-			}
-			for _, ex := range exercises {
-				cw.Write([]string{d.Format("2006-01-02"), ex.Name, fmt.Sprintf("%d", ex.DurationMin), fmt.Sprintf("%d", ex.CaloriesBurned)})
+		rows, eErr := h.pool.Query(ctx,
+			`SELECT (timestamp AT TIME ZONE 'UTC')::date, name, duration_min, calories_burned
+			 FROM exercises WHERE user_id = $1 AND timestamp >= $2 AND timestamp < $3 + interval '1 day'
+			 ORDER BY timestamp`, userID, fromDate, toDate)
+		if eErr == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var d time.Time
+				var name string
+				var dur, cal int32
+				if rows.Scan(&d, &name, &dur, &cal) == nil {
+					cw.Write([]string{d.Format("2006-01-02"), name, fmt.Sprintf("%d", dur), fmt.Sprintf("%d", cal)})
+				}
 			}
 		}
 
 	default:
 		cw.Write([]string{"Date", "Calories", "Protein (g)", "Carbs (g)", "Fat (g)", "Fiber (g)", "Water (ml)", "Calories Burned"})
-		for d := fromDate; !d.After(toDate); d = d.AddDate(0, 0, 1) {
-			summary, err := h.q.GetDailySummary(ctx, sqlc.GetDailySummaryParams{UserID: userID, Timestamp: d, Column3: "UTC"})
-			if err != nil {
-				continue
+		rows, mErr := h.pool.Query(ctx,
+			`SELECT d::date,
+			        COALESCE(m.cal, 0)::int, COALESCE(m.prot, 0)::float8, COALESCE(m.carb, 0)::float8,
+			        COALESCE(m.fat, 0)::float8, COALESCE(m.fib, 0)::float8,
+			        COALESCE(w.water, 0)::int, COALESCE(e.burned, 0)::int
+			 FROM generate_series($2, $3, '1 day'::interval) d
+			 LEFT JOIN (SELECT (timestamp AT TIME ZONE 'UTC')::date as dd,
+			               SUM(fi.calories)::int as cal, SUM(fi.protein_g)::float8 as prot,
+			               SUM(fi.carbs_g)::float8 as carb, SUM(fi.fat_g)::float8 as fat, SUM(fi.fiber_g)::float8 as fib
+			           FROM meals JOIN food_items fi ON fi.meal_id = meals.id
+			           WHERE meals.user_id = $1 GROUP BY dd) m ON m.dd = d::date
+			 LEFT JOIN (SELECT date, SUM(amount_ml)::int as water FROM water_logs
+			           WHERE user_id = $1 GROUP BY date) w ON w.date = d::date
+			 LEFT JOIN (SELECT (timestamp AT TIME ZONE 'UTC')::date as dd, SUM(calories_burned)::int as burned
+			           FROM exercises WHERE user_id = $1 GROUP BY dd) e ON e.dd = d::date
+			 ORDER BY d`, userID, fromDate, toDate)
+		if mErr == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var d time.Time
+				var cal, water, burned int
+				var prot, carb, fat, fib float64
+				if rows.Scan(&d, &cal, &prot, &carb, &fat, &fib, &water, &burned) == nil {
+					cw.Write([]string{
+						d.Format("2006-01-02"),
+						fmt.Sprintf("%d", cal), fmt.Sprintf("%.1f", prot),
+						fmt.Sprintf("%.1f", carb), fmt.Sprintf("%.1f", fat),
+						fmt.Sprintf("%.1f", fib), fmt.Sprintf("%d", water),
+						fmt.Sprintf("%d", burned),
+					})
+				}
 			}
-			cw.Write([]string{
-				d.Format("2006-01-02"),
-				fmt.Sprintf("%d", summary.TotalCalories),
-				fmt.Sprintf("%.1f", summary.TotalProtein),
-				fmt.Sprintf("%.1f", summary.TotalCarbs),
-				fmt.Sprintf("%.1f", summary.TotalFat),
-				fmt.Sprintf("%.1f", summary.TotalFiber),
-				fmt.Sprintf("%d", summary.TotalWaterMl),
-				fmt.Sprintf("%d", summary.TotalBurned),
-			})
 		}
 	}
 }
@@ -212,53 +244,86 @@ func (h *Handler) ExportJSON(w http.ResponseWriter, r *http.Request) {
 
 	case "water":
 		var rows []waterRow
-		for d := fromDate; !d.After(toDate); d = d.AddDate(0, 0, 1) {
-			total, err := h.q.GetWaterByDate(ctx, sqlc.GetWaterByDateParams{UserID: userID, Date: d})
-			if err != nil {
-				continue
+		dbRows, wErr := h.pool.Query(ctx,
+			`SELECT date, COALESCE(SUM(amount_ml),0)::bigint as total FROM water_logs
+			 WHERE user_id = $1 AND date BETWEEN $2 AND $3
+			 GROUP BY date ORDER BY date`, userID, fromDate, toDate)
+		if wErr == nil {
+			defer dbRows.Close()
+			for dbRows.Next() {
+				var d time.Time
+				var total int64
+				if dbRows.Scan(&d, &total) == nil {
+					rows = append(rows, waterRow{
+						Date: d.Format("2006-01-02"),
+						Ml:   total,
+					})
+				}
 			}
-			rows = append(rows, waterRow{
-				Date: d.Format("2006-01-02"),
-				Ml:   int64(total),
-			})
 		}
 		json.NewEncoder(w).Encode(rows)
 
 	case "exercise":
 		var rows []exerciseRow
-		for d := fromDate; !d.After(toDate); d = d.AddDate(0, 0, 1) {
-			exercises, err := h.q.GetExercisesByDate(ctx, sqlc.GetExercisesByDateParams{UserID: userID, Timestamp: d, Column3: "UTC"})
-			if err != nil {
-				continue
-			}
-			for _, ex := range exercises {
-				rows = append(rows, exerciseRow{
-					Date:        d.Format("2006-01-02"),
-					Name:        ex.Name,
-					DurationMin: ex.DurationMin,
-					Calories:    ex.CaloriesBurned,
-				})
+		dbRows, eErr := h.pool.Query(ctx,
+			`SELECT (timestamp AT TIME ZONE 'UTC')::date, name, duration_min, calories_burned
+			 FROM exercises WHERE user_id = $1 AND timestamp >= $2 AND timestamp < $3 + interval '1 day'
+			 ORDER BY timestamp`, userID, fromDate, toDate)
+		if eErr == nil {
+			defer dbRows.Close()
+			for dbRows.Next() {
+				var d time.Time
+				var name string
+				var dur, cal int32
+				if dbRows.Scan(&d, &name, &dur, &cal) == nil {
+					rows = append(rows, exerciseRow{
+						Date:        d.Format("2006-01-02"),
+						Name:        name,
+						DurationMin: dur,
+						Calories:    cal,
+					})
+				}
 			}
 		}
 		json.NewEncoder(w).Encode(rows)
 
 	default:
 		var rows []dayRow
-		for d := fromDate; !d.After(toDate); d = d.AddDate(0, 0, 1) {
-			summary, err := h.q.GetDailySummary(ctx, sqlc.GetDailySummaryParams{UserID: userID, Timestamp: d, Column3: "UTC"})
-			if err != nil {
-				continue
+		dbRows, mErr := h.pool.Query(ctx,
+			`SELECT d::date,
+			        COALESCE(m.cal, 0)::int, COALESCE(m.prot, 0)::float8, COALESCE(m.carb, 0)::float8,
+			        COALESCE(m.fat, 0)::float8, COALESCE(m.fib, 0)::float8,
+			        COALESCE(w.water, 0)::int, COALESCE(e.burned, 0)::int
+			 FROM generate_series($2, $3, '1 day'::interval) d
+			 LEFT JOIN (SELECT (timestamp AT TIME ZONE 'UTC')::date as dd,
+			               SUM(fi.calories)::int as cal, SUM(fi.protein_g)::float8 as prot,
+			               SUM(fi.carbs_g)::float8 as carb, SUM(fi.fat_g)::float8 as fat, SUM(fi.fiber_g)::float8 as fib
+			           FROM meals JOIN food_items fi ON fi.meal_id = meals.id
+			           WHERE meals.user_id = $1 GROUP BY dd) m ON m.dd = d::date
+			 LEFT JOIN (SELECT date, SUM(amount_ml)::int as water FROM water_logs
+			           WHERE user_id = $1 GROUP BY date) w ON w.date = d::date
+			 LEFT JOIN (SELECT (timestamp AT TIME ZONE 'UTC')::date as dd, SUM(calories_burned)::int as burned
+			           FROM exercises WHERE user_id = $1 GROUP BY dd) e ON e.dd = d::date
+			 ORDER BY d`, userID, fromDate, toDate)
+		if mErr == nil {
+			defer dbRows.Close()
+			for dbRows.Next() {
+				var d time.Time
+				var cal, water, burned int
+				var prot, carb, fat, fib float64
+				if dbRows.Scan(&d, &cal, &prot, &carb, &fat, &fib, &water, &burned) == nil {
+					rows = append(rows, dayRow{
+						Date:     d.Format("2006-01-02"),
+						Calories: int32(cal),
+						Protein:  prot,
+						Carbs:    carb,
+						Fat:      fat,
+						Fiber:    fib,
+						Water:    int32(water),
+						Burned:   int32(burned),
+					})
+				}
 			}
-			rows = append(rows, dayRow{
-				Date:     d.Format("2006-01-02"),
-				Calories: summary.TotalCalories,
-				Protein:  summary.TotalProtein,
-				Carbs:    summary.TotalCarbs,
-				Fat:      summary.TotalFat,
-				Fiber:    summary.TotalFiber,
-				Water:    summary.TotalWaterMl,
-				Burned:   summary.TotalBurned,
-			})
 		}
 		json.NewEncoder(w).Encode(rows)
 	}

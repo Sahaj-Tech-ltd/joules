@@ -76,16 +76,24 @@ func (s *Service) runSchedulerTick(ctx context.Context) {
 			}
 		}
 
-		if isQuietHours(now, prefs) {
+		var tz string
+		_ = s.pool.QueryRow(ctx, "SELECT COALESCE(timezone, 'UTC') FROM user_profiles WHERE user_id = $1", uid).Scan(&tz)
+		loc, _ := time.LoadLocation(tz)
+		if loc == nil {
+			loc = time.UTC
+		}
+		localNow := now.In(loc)
+
+		if isQuietHours(localNow, prefs) {
 			continue
 		}
 
-		s.checkWaterReminder(ctx, uid, now, prefs)
-		s.checkMealReminder(ctx, uid, now, prefs)
-		s.checkIFWindowReminder(ctx, uid, now, prefs)
-		s.checkStreakReminder(ctx, uid, now, prefs)
-		s.checkWeightReminder(ctx, uid, now, prefs)
-		s.checkCoachReminders(ctx, uid, now, prefs)
+		s.checkWaterReminder(ctx, uid, localNow, prefs)
+		s.checkMealReminder(ctx, uid, localNow, prefs)
+		s.checkIFWindowReminder(ctx, uid, localNow, prefs)
+		s.checkStreakReminder(ctx, uid, localNow, prefs)
+		s.checkWeightReminder(ctx, uid, localNow, prefs)
+		s.checkCoachReminders(ctx, uid, localNow, prefs)
 	}
 }
 
@@ -190,7 +198,6 @@ func (s *Service) checkIFWindowReminder(ctx context.Context, userID string, now 
 		}
 	}
 
-	fastHours := 24 - windowHours
 	windowStartHour := 12
 	if goals.EatingWindowStart.Valid {
 		windowStartHour = int(goals.EatingWindowStart.Microseconds / 3600_000_000)
@@ -225,7 +232,7 @@ func (s *Service) checkIFWindowReminder(ctx context.Context, userID string, now 
 	if h == closeWarningHour && m >= 45 {
 		s.SendToUser(ctx, userID, Payload{
 			Title: "⏰ Eating Window Closes Soon",
-			Body:  fmt.Sprintf("You have ~%d minutes left in your eating window. Last chance to log!", fastHours),
+			Body:  "You have ~15 minutes left in your eating window. Last chance to log!",
 			URL:   "/log",
 			Tag:   "if-window-close",
 		})

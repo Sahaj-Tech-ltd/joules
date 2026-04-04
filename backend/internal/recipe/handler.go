@@ -43,6 +43,14 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, apiResponse{Error: msg})
 }
 
+func getUserID(r *http.Request) (string, error) {
+	userID, ok := r.Context().Value(auth.ContextUserID).(string)
+	if !ok {
+		return "", fmt.Errorf("unauthorized")
+	}
+	return userID, nil
+}
+
 // RecipeFood represents a single food item within a recipe.
 type RecipeFood struct {
 	Name        string  `json:"name"`
@@ -72,7 +80,11 @@ type CreateRecipeRequest struct {
 
 // List handles GET /api/recipes — returns all recipes for the authenticated user.
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
-	userID := r.Context().Value(auth.ContextUserID).(string)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	ctx := r.Context()
 
 	rows, err := h.pool.Query(ctx,
@@ -155,9 +167,12 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, apiResponse{Data: results})
 }
 
-// Create handles POST /api/recipes — creates a new recipe for the authenticated user.
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
-	userID := r.Context().Value(auth.ContextUserID).(string)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	ctx := r.Context()
 
 	var req CreateRecipeRequest
@@ -170,10 +185,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Insert recipe
 	var recipeID string
 	var createdAt time.Time
-	err := h.pool.QueryRow(ctx,
+	err = h.pool.QueryRow(ctx,
 		`INSERT INTO recipes (user_id, name, description) VALUES ($1, $2, $3) RETURNING id, created_at`,
 		userID, req.Name, req.Description,
 	).Scan(&recipeID, &createdAt)
@@ -215,13 +229,17 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 // Delete handles DELETE /api/recipes/{id} — deletes a recipe owned by the user.
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
-	userID := r.Context().Value(auth.ContextUserID).(string)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	recipeID := chi.URLParam(r, "id")
 	ctx := r.Context()
 
 	// Verify ownership
 	var ownerID string
-	err := h.pool.QueryRow(ctx,
+	err = h.pool.QueryRow(ctx,
 		`SELECT user_id FROM recipes WHERE id = $1`, recipeID,
 	).Scan(&ownerID)
 	if err != nil {

@@ -215,10 +215,10 @@
             api.get<{public_key: string}>('/notifications/vapid-public-key'),
           ]);
           notifPrefs = notifData;
-          if (notifData.ntfy_topic && vapidPublicKey) {
+          vapidPublicKey = vapidData.public_key;
+          if (notifData.ntfy_topic) {
             ntfyURL = `${import.meta.env.VITE_NTFY_BASE_URL || 'https://ntfy.sh'}/${notifData.ntfy_topic}`;
           }
-          vapidPublicKey = vapidData.public_key;
         } catch {}
 
         if ('Notification' in window) {

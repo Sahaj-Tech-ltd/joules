@@ -74,15 +74,9 @@
     });
   }
 
-  onMount(() => {
-    createChart();
-  });
-
   $effect(() => {
-    void data.length;
-    if (chart) {
-      createChart();
-    }
+    void data;
+    createChart();
   });
 
   onDestroy(() => {

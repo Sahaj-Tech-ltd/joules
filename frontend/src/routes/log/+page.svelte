@@ -130,6 +130,8 @@
 
     loadRecipes();
     loadFavorites();
+
+    return unsub;
   });
 
   async function loadRecipes() {

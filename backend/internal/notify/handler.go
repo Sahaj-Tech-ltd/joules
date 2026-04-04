@@ -43,8 +43,12 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, apiResponse{Error: msg})
 }
 
-func userID(r *http.Request) string {
-	return r.Context().Value(auth.ContextUserID).(string)
+func getUserID(r *http.Request) (string, error) {
+	uid, ok := r.Context().Value(auth.ContextUserID).(string)
+	if !ok {
+		return "", fmt.Errorf("unauthorized")
+	}
+	return uid, nil
 }
 
 // GetVAPIDPublicKey returns the VAPID public key so the frontend can subscribe.
@@ -73,7 +77,11 @@ func (h *Handler) Subscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	uid := userID(r)
+	uid, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	if err := h.q.SavePushSubscription(r.Context(), sqlc.SavePushSubscriptionParams{
 		UserID:    uid,
 		Endpoint:  req.Endpoint,
@@ -130,9 +138,15 @@ func (h *Handler) Unsubscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	uid, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
+
 	if err := h.q.DeletePushSubscription(r.Context(), sqlc.DeletePushSubscriptionParams{
 		Endpoint: req.Endpoint,
-		UserID:   userID(r),
+		UserID:   uid,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -143,7 +157,12 @@ func (h *Handler) Unsubscribe(w http.ResponseWriter, r *http.Request) {
 
 // GetPreferences returns the user's notification preferences (or sensible defaults).
 func (h *Handler) GetPreferences(w http.ResponseWriter, r *http.Request) {
-	prefs, err := h.q.GetNotificationPrefs(r.Context(), userID(r))
+	uid, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
+	prefs, err := h.q.GetNotificationPrefs(r.Context(), uid)
 	if err != nil {
 		// Return defaults if not yet set
 		writeJSON(w, http.StatusOK, apiResponse{Data: sqlc.NotificationPreference{
@@ -189,8 +208,14 @@ func (h *Handler) SavePreferences(w http.ResponseWriter, r *http.Request) {
 		req.QuietEnd = 8
 	}
 
+	uid, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
+
 	prefs, err := h.q.UpsertNotificationPrefs(r.Context(), sqlc.UpsertNotificationPrefsParams{
-		UserID:             userID(r),
+		UserID:             uid,
 		WaterReminders:     req.WaterReminders,
 		WaterIntervalHours: req.WaterIntervalHours,
 		MealReminders:      req.MealReminders,
@@ -210,7 +235,11 @@ func (h *Handler) SavePreferences(w http.ResponseWriter, r *http.Request) {
 
 // SendTest sends a test notification to verify the setup works.
 func (h *Handler) SendTest(w http.ResponseWriter, r *http.Request) {
-	uid := userID(r)
+	uid, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	h.svc.SendToUser(r.Context(), uid, Payload{
 		Title: "Joules Notifications ✓",
 		Body:  "Notifications are working! You'll receive water, meal, and goal reminders here.",

@@ -99,6 +99,8 @@ type offSearchResponse struct {
 
 // searchLocal queries the local foods_db using full-text and LIKE search.
 func (h *Handler) searchLocal(r *http.Request, q string, limit int) ([]FoodResult, error) {
+	q = strings.ReplaceAll(q, "%", "\\%")
+	q = strings.ReplaceAll(q, "_", "\\_")
 	const localSQL = `
 		SELECT id, COALESCE(barcode,''), name, brand, calories, protein_g, carbs_g, fat_g, fiber_g, serving_size, ingredients
 		FROM foods_db

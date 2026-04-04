@@ -60,6 +60,14 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, apiResponse{Error: msg})
 }
 
+func getCoachUserID(r *http.Request) (string, error) {
+	userID, ok := r.Context().Value(auth.ContextUserID).(string)
+	if !ok {
+		return "", fmt.Errorf("unauthorized")
+	}
+	return userID, nil
+}
+
 func getUserID(r *http.Request) (string, error) {
 	userID, ok := r.Context().Value(auth.ContextUserID).(string)
 	if !ok {
@@ -82,6 +90,20 @@ type tipsCacheEntry struct {
 }
 
 var tipsCache sync.Map
+
+func init() {
+	go func() {
+		for range time.Tick(4 * time.Hour) {
+			now := time.Now()
+			tipsCache.Range(func(key, value any) bool {
+				if entry, ok := value.(tipsCacheEntry); ok && now.Sub(entry.cachedAt) > 4*time.Hour {
+					tipsCache.Delete(key)
+				}
+				return true
+			})
+		}
+	}()
+}
 
 type chatMessageRequest struct {
 	Content string `json:"content"`
@@ -758,8 +780,9 @@ func (h *Handler) agentTools() []ai.Tool {
 }
 
 func truncate(s string, n int) string {
-	if len(s) > n {
-		return s[:n]
+	runes := []rune(s)
+	if len(runes) > n {
+		return string(runes[:n])
 	}
 	return s
 }
@@ -1614,7 +1637,18 @@ func (h *Handler) fetchURL(rawURL string) (string, error) {
 		return "", fmt.Errorf("URL resolves to a blocked address")
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("too many redirects")
+			}
+			if isBlockedHost(req.URL.Hostname()) {
+				return fmt.Errorf("redirect to blocked host")
+			}
+			return nil
+		},
+	}
 	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
@@ -1641,8 +1675,9 @@ func (h *Handler) fetchURL(rawURL string) (string, error) {
 	text := stripHTML(string(body))
 
 	// Truncate to 3000 chars
-	if len(text) > 3000 {
-		text = text[:3000] + "\n[content truncated]"
+	textRunes := []rune(text)
+	if len(textRunes) > 3000 {
+		text = string(textRunes[:3000]) + "\n[content truncated]"
 	}
 	return text, nil
 }
@@ -1771,7 +1806,11 @@ Calories: %d kcal | Protein: %.1fg | Carbs: %.1fg | Fat: %.1fg | Fiber: %.1fg`,
 }
 
 func (h *Handler) GetRemindersAPI(w http.ResponseWriter, r *http.Request) {
-	userID := r.Context().Value(auth.ContextUserID).(string)
+	userID, err := getCoachUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	reminders, err := GetReminders(r.Context(), h.pool, userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("get reminders: %w", err))
@@ -1784,7 +1823,11 @@ func (h *Handler) GetRemindersAPI(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ToggleReminderAPI(w http.ResponseWriter, r *http.Request) {
-	userID := r.Context().Value(auth.ContextUserID).(string)
+	userID, err := getCoachUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	reminderID := chi.URLParam(r, "id")
 	var req struct {
 		Enabled bool `json:"enabled"`
@@ -1801,7 +1844,11 @@ func (h *Handler) ToggleReminderAPI(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) DeleteReminderAPI(w http.ResponseWriter, r *http.Request) {
-	userID := r.Context().Value(auth.ContextUserID).(string)
+	userID, err := getCoachUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	reminderID := chi.URLParam(r, "id")
 	if err := DeleteReminder(r.Context(), h.pool, userID, reminderID); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("delete reminder: %w", err))

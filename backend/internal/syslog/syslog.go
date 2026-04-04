@@ -3,32 +3,53 @@ package syslog
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var pool *pgxpool.Pool
+var logCh chan logEntry
 
-// Init registers the DB pool used for logging. Call once at startup.
-func Init(p *pgxpool.Pool) {
-	pool = p
+type logEntry struct {
+	level    string
+	category string
+	message  string
+	details  []byte
 }
 
-// Log writes an event to system_logs asynchronously (fire-and-forget).
+func Init(p *pgxpool.Pool) {
+	pool = p
+	logCh = make(chan logEntry, 1000)
+	go drainLoop()
+}
+
+func drainLoop() {
+	for entry := range logCh {
+		if pool == nil {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		pool.Exec(ctx,
+			"INSERT INTO system_logs (level, category, message, details) VALUES ($1, $2, $3, $4)",
+			entry.level, entry.category, entry.message, entry.details,
+		)
+		cancel()
+	}
+}
+
 func Log(level, category, message string, details map[string]any) {
-	if pool == nil {
+	if logCh == nil {
 		return
 	}
 	var detailsJSON []byte
 	if len(details) > 0 {
 		detailsJSON, _ = json.Marshal(details)
 	}
-	go func() {
-		pool.Exec(context.Background(),
-			"INSERT INTO system_logs (level, category, message, details) VALUES ($1, $2, $3, $4)",
-			level, category, message, detailsJSON,
-		)
-	}()
+	select {
+	case logCh <- logEntry{level: level, category: category, message: message, details: detailsJSON}:
+	default:
+	}
 }
 
 func Info(category, message string, details map[string]any)  { Log("info", category, message, details) }

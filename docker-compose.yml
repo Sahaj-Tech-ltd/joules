@@ -24,7 +24,7 @@ services:
     environment:
       PORT: "${PORT:-8687}"
       APP_URL: ${APP_URL:-http://localhost:8687}
-      DATABASE_URL: postgres://joules:joules@postgres:5432/joules?sslmode=disable
+      DATABASE_URL: postgres://joule:joule@postgres:5432/joule?sslmode=disable
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       AI_PROVIDER: ${AI_PROVIDER:-openai}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -39,6 +39,15 @@ services:
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@joules.local}
       REQUIRE_APPROVAL: ${REQUIRE_APPROVAL:-false}
       ROUTING_MODEL: ${ROUTING_MODEL:-}
+      VISION_MODEL: ${VISION_MODEL:-}
+      OCR_MODEL: ${OCR_MODEL:-}
+      CLASSIFIER_MODEL: ${CLASSIFIER_MODEL:-}
+      VISION_API_KEY: ${VISION_API_KEY:-}
+      VISION_BASE_URL: ${VISION_BASE_URL:-}
+      OCR_API_KEY: ${OCR_API_KEY:-}
+      OCR_BASE_URL: ${OCR_BASE_URL:-}
+      CLASSIFIER_API_KEY: ${CLASSIFIER_API_KEY:-}
+      CLASSIFIER_BASE_URL: ${CLASSIFIER_BASE_URL:-}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       VAPID_CONTACT: ${VAPID_CONTACT:-}

@@ -25,6 +25,7 @@
   let challenges = $state<Challenge[]>([]);
   let loading = $state(true);
   let copied = $state(false);
+  let groupError = $state('');
 
   // Create challenge modal
   let showChallenge = $state(false);
@@ -64,14 +65,24 @@
 
   async function leaveGroup() {
     if (!confirm('Leave this group?')) return;
-    await api.post(`/groups/${groupId}/leave`, {});
-    goto('/groups');
+    try {
+      await api.post(`/groups/${groupId}/leave`, {});
+      goto('/groups');
+    } catch (e: any) {
+      groupError = e?.message || 'Failed to leave group';
+      setTimeout(() => { groupError = ''; }, 3000);
+    }
   }
 
   async function deleteGroup() {
     if (!confirm('Delete this group? This cannot be undone.')) return;
-    await api.del(`/groups/${groupId}`);
-    goto('/groups');
+    try {
+      await api.del(`/groups/${groupId}`);
+      goto('/groups');
+    } catch (e: any) {
+      groupError = e?.message || 'Failed to delete group';
+      setTimeout(() => { groupError = ''; }, 3000);
+    }
   }
 
   function copyInviteCode() {
@@ -113,6 +124,9 @@
         <div class="h-7 w-7 animate-spin rounded-full border-2 border-border border-t-primary"></div>
       </div>
     {:else if group}
+      {#if groupError}
+        <div class="rounded-lg bg-destructive/10 text-destructive text-sm px-4 py-2">{groupError}</div>
+      {/if}
       <!-- Header -->
       <div class="mb-6">
         <div class="flex items-start justify-between gap-4 mb-1">

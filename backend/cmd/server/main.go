@@ -154,7 +154,7 @@ func main() {
 		os.Exit(1)
 	}
 	achievementHandler := achievement.NewHandler(queries)
-	exportHandler := export.NewHandler(queries)
+	exportHandler := export.NewHandler(queries, pool)
 	fastingHandler := fasting.NewHandler(queries)
 	srv := &http.Server{}
 	adminHandler := admin.NewHandler(pool, cfg.RequireApproval, cfg, aiClient, srv)

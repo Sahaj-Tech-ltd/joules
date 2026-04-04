@@ -184,11 +184,16 @@ func (h *Handler) CreateGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Creator becomes admin member
-	_ = h.q.AddGroupMember(r.Context(), sqlc.AddGroupMemberParams{
+	err = h.q.AddGroupMember(r.Context(), sqlc.AddGroupMemberParams{
 		GroupID: g.ID,
 		UserID:  userID,
 		Role:    "admin",
 	})
+	if err != nil {
+		_ = h.q.DeleteGroup(r.Context(), sqlc.DeleteGroupParams{ID: g.ID, CreatedBy: userID})
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("create group member: %w", err))
+		return
+	}
 
 	writeJSON(w, http.StatusCreated, apiResponse{Data: GroupItem{
 		ID:          g.ID,
@@ -254,11 +259,15 @@ func (h *Handler) JoinGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = h.q.AddGroupMember(r.Context(), sqlc.AddGroupMemberParams{
+	err = h.q.AddGroupMember(r.Context(), sqlc.AddGroupMemberParams{
 		GroupID: groupID,
 		UserID:  userID,
 		Role:    "member",
 	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("join group: %w", err))
+		return
+	}
 
 	row, err := h.q.GetGroupByID(r.Context(), sqlc.GetGroupByIDParams{ID: groupID, UserID: userID})
 	if err != nil {
@@ -312,7 +321,10 @@ func (h *Handler) LeaveGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	groupID := chi.URLParam(r, "id")
-	_ = h.q.RemoveGroupMember(r.Context(), sqlc.RemoveGroupMemberParams{GroupID: groupID, UserID: userID})
+	if err := h.q.RemoveGroupMember(r.Context(), sqlc.RemoveGroupMemberParams{GroupID: groupID, UserID: userID}); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("leave group: %w", err))
+		return
+	}
 	writeJSON(w, http.StatusOK, apiResponse{Data: map[string]bool{"left": true}})
 }
 
@@ -323,7 +335,10 @@ func (h *Handler) DeleteGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	groupID := chi.URLParam(r, "id")
-	_ = h.q.DeleteGroup(r.Context(), sqlc.DeleteGroupParams{ID: groupID, CreatedBy: userID})
+	if err := h.q.DeleteGroup(r.Context(), sqlc.DeleteGroupParams{ID: groupID, CreatedBy: userID}); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("delete group: %w", err))
+		return
+	}
 	writeJSON(w, http.StatusOK, apiResponse{Data: map[string]bool{"deleted": true}})
 }
 

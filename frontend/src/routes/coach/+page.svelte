@@ -88,11 +88,14 @@
     tick().then(scrollToBottom);
   }
 
+  let isNewChat = $state(false);
+
   function startNewChat() {
     activeConversation = null;
     isNewChat = true;
     displayMessages = [];
     sidebarOpen = false;
+    isNewChat = true;
   }
 
   function refreshConversations() {
@@ -159,6 +162,7 @@
       allMessages.unshift({ id: res.id, role: 'assistant', content: res.content, created_at: res.created_at });
       isNewChat = false;
       refreshConversations();
+      isNewChat = false;
       checkAchievements();
     } catch {
       displayMessages = displayMessages.filter(m => m.id !== tempId);

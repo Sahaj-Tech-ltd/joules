@@ -57,8 +57,12 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, apiResponse{Error: msg})
 }
 
-func getUserID(r *http.Request) string {
-	return r.Context().Value(auth.ContextUserID).(string)
+func getUserID(r *http.Request) (string, error) {
+	userID, ok := r.Context().Value(auth.ContextUserID).(string)
+	if !ok {
+		return "", fmt.Errorf("unauthorized")
+	}
+	return userID, nil
 }
 
 func floatToNumeric(f float64) pgtype.Numeric {
@@ -247,7 +251,11 @@ func (h *Handler) CreateMeal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	timestamp := time.Now()
 
 	var photoPath *string
@@ -277,12 +285,12 @@ func (h *Handler) CreateMeal(w http.ResponseWriter, r *http.Request) {
 		photoPath = &relPath
 
 		if h.ai != nil {
-			identified, err := h.identifyFoodFromPhoto(imageBytes, req.PortionHint, getUserID(r))
+			identified, err := h.identifyFoodFromPhoto(imageBytes, req.PortionHint, userID)
 			if err != nil {
 				slog.Error("ai food identification failed", "error", err)
-				syslog.Error("ai", "Photo food identification failed", map[string]any{"user_id": getUserID(r), "error": err.Error(), "date": time.Now().Format("2006-01-02")})
+				syslog.Error("ai", "Photo food identification failed", map[string]any{"user_id": userID, "error": err.Error(), "date": time.Now().Format("2006-01-02")})
 			} else {
-				syslog.Info("ai", "Photo food identification", map[string]any{"user_id": getUserID(r), "items_found": len(identified), "date": time.Now().Format("2006-01-02")})
+				syslog.Info("ai", "Photo food identification", map[string]any{"user_id": userID, "items_found": len(identified), "date": time.Now().Format("2006-01-02")})
 				for _, food := range identified {
 					aiFoods = append(aiFoods, ManualFood{
 						Name:        food.Name,
@@ -403,7 +411,11 @@ func decodePhotoData(dataURL, userID string) ([]byte, string, error) {
 }
 
 func (h *Handler) GetMealsByDate(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	tz := r.Header.Get("X-Timezone")
 	if tz == "" {
 		tz = "UTC"
@@ -454,7 +466,11 @@ func (h *Handler) GetMealsByDate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetRecentMeals(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 
 	// Single JOIN query instead of N+1 sequential queries.
 	mealResponses, err := h.fetchRecentMealsWithFoods(r.Context(), userID)
@@ -472,7 +488,11 @@ func (h *Handler) GetRecentMeals(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DeleteMeal(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 
 	if _, err := h.q.GetMealByID(r.Context(), sqlc.GetMealByIDParams{
 		ID:     id,
@@ -496,7 +516,11 @@ func (h *Handler) DeleteMeal(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) UpdateFoodItem(w http.ResponseWriter, r *http.Request) {
 	foodID := chi.URLParam(r, "foodId")
 	mealID := chi.URLParam(r, "mealId")
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 
 	if _, err := h.q.GetMealByID(r.Context(), sqlc.GetMealByIDParams{
 		ID:     mealID,
@@ -586,7 +610,11 @@ func (h *Handler) CarryForward(w http.ResponseWriter, r *http.Request) {
 		req.MealType = "snack"
 	}
 
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	ctx := r.Context()
 	noteText := "Leftovers from yesterday"
 
@@ -651,7 +679,11 @@ func (h *Handler) CarryForward(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteFoodItemHandler(w http.ResponseWriter, r *http.Request) {
 	foodID := chi.URLParam(r, "foodId")
 	mealID := chi.URLParam(r, "mealId")
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 
 	if _, err := h.q.GetMealByID(r.Context(), sqlc.GetMealByIDParams{
 		ID:     mealID,
@@ -677,7 +709,11 @@ func (h *Handler) DeleteFoodItemHandler(w http.ResponseWriter, r *http.Request) 
 // Body: { "meal_type": "lunch" }
 func (h *Handler) LogMealFromRecipe(w http.ResponseWriter, r *http.Request) {
 	recipeID := chi.URLParam(r, "recipeId")
-	userID := getUserID(r)
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
 	ctx := r.Context()
 
 	var req LogMealFromRecipeRequest
@@ -690,7 +726,7 @@ func (h *Handler) LogMealFromRecipe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var recipeName string
-	err := h.pool.QueryRow(ctx,
+	err = h.pool.QueryRow(ctx,
 		`SELECT name FROM recipes WHERE id = $1 AND user_id = $2`, recipeID, userID,
 	).Scan(&recipeName)
 	if err != nil {

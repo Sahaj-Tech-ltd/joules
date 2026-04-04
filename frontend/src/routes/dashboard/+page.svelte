@@ -249,6 +249,7 @@
     if (exportTo) params.set('to', exportTo);
     const url = `/api/export/${exportFormat}?${params.toString()}`;
     const token = get(authToken);
+    if (!token) return;
     const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
     if (!res.ok) return;
     const blob = await res.blob();
