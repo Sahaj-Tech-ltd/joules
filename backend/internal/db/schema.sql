@@ -11,7 +11,10 @@ CREATE TABLE users (
     is_admin BOOLEAN NOT NULL DEFAULT FALSE,
     approved BOOLEAN NOT NULL DEFAULT TRUE,
     must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
-    verification_code_expires_at TIMESTAMPTZ
+    verification_code_expires_at TIMESTAMPTZ,
+    plan TEXT NOT NULL DEFAULT 'free',
+    plan_expires_at TIMESTAMPTZ,
+    trial_started_at TIMESTAMPTZ
 );
 
 CREATE TABLE user_profiles (
@@ -26,6 +29,7 @@ CREATE TABLE user_profiles (
     avatar_url TEXT,
     coach_notes TEXT NOT NULL DEFAULT '',
     onboarding_complete BOOLEAN NOT NULL DEFAULT FALSE,
+    identity_aspiration TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -171,6 +175,16 @@ INSERT INTO app_settings (key, value) VALUES ('vision_model', '') ON CONFLICT (k
 INSERT INTO app_settings (key, value) VALUES ('ocr_model', '') ON CONFLICT (key) DO NOTHING;
 INSERT INTO app_settings (key, value) VALUES ('custom_base_url', '') ON CONFLICT (key) DO NOTHING;
 INSERT INTO app_settings (key, value) VALUES ('custom_api_key', '') ON CONFLICT (key) DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('vision_provider', '') ON CONFLICT (key) DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('vision_api_key', '') ON CONFLICT (key) DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('vision_base_url', '') ON CONFLICT (key) DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('ocr_provider', '') ON CONFLICT (key) DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('ocr_api_key', '') ON CONFLICT (key) DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('ocr_base_url', '') ON CONFLICT (key) DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('classifier_provider', '') ON CONFLICT (key) DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('classifier_api_key', '') ON CONFLICT (key) DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('classifier_base_url', '') ON CONFLICT (key) DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('classifier_model', '') ON CONFLICT (key) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS push_subscriptions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -342,6 +356,8 @@ CREATE TABLE IF NOT EXISTS user_stats (
     total_points INT NOT NULL DEFAULT 0,
     streak_days INT NOT NULL DEFAULT 0,
     last_active_date DATE,
+    current_phase TEXT NOT NULL DEFAULT 'scaffolding',
+    phase_updated_at TIMESTAMPTZ,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -362,3 +378,82 @@ CREATE TABLE IF NOT EXISTS food_favorites (
 );
 CREATE INDEX IF NOT EXISTS food_favorites_user_idx ON food_favorites(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS food_favorites_user_name_idx ON food_favorites(user_id, lower(name));
+
+-- Per-user food memory (correction learning)
+CREATE TABLE IF NOT EXISTS user_food_memory (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    food_name TEXT NOT NULL,
+    canonical_name TEXT,
+    calories REAL NOT NULL,
+    protein REAL DEFAULT 0,
+    carbs REAL DEFAULT 0,
+    fat REAL DEFAULT 0,
+    fiber REAL DEFAULT 0,
+    serving_size REAL,
+    serving_unit TEXT,
+    correction_count INT DEFAULT 1,
+    source TEXT DEFAULT 'user_correction',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(user_id, food_name)
+);
+CREATE INDEX IF NOT EXISTS idx_user_food_memory_user ON user_food_memory(user_id);
+
+-- Identity quote history (deduplication)
+CREATE TABLE IF NOT EXISTS identity_quotes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    quote TEXT NOT NULL,
+    date DATE NOT NULL DEFAULT CURRENT_DATE,
+    context_type TEXT DEFAULT 'daily',
+    UNIQUE(user_id, date)
+);
+
+-- Grace days tracking
+CREATE TABLE IF NOT EXISTS grace_days (
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    week_start DATE NOT NULL,
+    days_used INT DEFAULT 0,
+    max_per_week INT DEFAULT 2,
+    PRIMARY KEY (user_id, week_start)
+);
+
+-- Implementation intentions (if-then plans)
+CREATE TABLE IF NOT EXISTS implementation_intentions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    meal_type TEXT NOT NULL,
+    trigger_text TEXT NOT NULL,
+    action_text TEXT NOT NULL,
+    notification_time TIME,
+    enabled BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_implementation_intentions_user ON implementation_intentions(user_id);
+
+-- Stripe subscriptions (cloud only)
+CREATE TABLE IF NOT EXISTS subscriptions (
+    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    stripe_customer_id TEXT,
+    stripe_subscription_id TEXT,
+    status TEXT DEFAULT 'trialing',
+    current_period_end TIMESTAMPTZ,
+    plan TEXT DEFAULT 'free'
+);
+
+-- Expo push tokens
+CREATE TABLE IF NOT EXISTS expo_push_tokens (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token TEXT NOT NULL,
+    platform TEXT NOT NULL CHECK (platform IN ('ios', 'android')),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(user_id, token)
+);
+CREATE INDEX IF NOT EXISTS idx_expo_push_tokens_user ON expo_push_tokens(user_id);
+
+-- Plan-tier model overrides
+INSERT INTO app_settings (key, value) VALUES ('model_vision_free', '') ON CONFLICT (key) DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('model_primary_free', '') ON CONFLICT (key) DO NOTHING;

@@ -286,3 +286,96 @@ CREATE UNIQUE INDEX IF NOT EXISTS food_favorites_user_name_idx ON food_favorites
 ALTER TABLE achievements ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'general';
 ALTER TABLE achievements ADD COLUMN IF NOT EXISTS progress_current INT NOT NULL DEFAULT 0;
 ALTER TABLE achievements ADD COLUMN IF NOT EXISTS progress_target INT NOT NULL DEFAULT 0;
+
+-- v3.0: React Native mobile support
+
+-- Plan tier columns
+ALTER TABLE users ADD COLUMN IF NOT EXISTS plan TEXT NOT NULL DEFAULT 'free';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_expires_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_started_at TIMESTAMPTZ;
+
+-- Identity aspiration for behavioral science
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS identity_aspiration TEXT;
+
+-- Habit phase tracking
+ALTER TABLE user_stats ADD COLUMN IF NOT EXISTS current_phase TEXT NOT NULL DEFAULT 'scaffolding';
+ALTER TABLE user_stats ADD COLUMN IF NOT EXISTS phase_updated_at TIMESTAMPTZ;
+
+-- Per-user food memory (correction learning)
+CREATE TABLE IF NOT EXISTS user_food_memory (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    food_name TEXT NOT NULL,
+    canonical_name TEXT,
+    calories REAL NOT NULL,
+    protein REAL DEFAULT 0,
+    carbs REAL DEFAULT 0,
+    fat REAL DEFAULT 0,
+    fiber REAL DEFAULT 0,
+    serving_size REAL,
+    serving_unit TEXT,
+    correction_count INT DEFAULT 1,
+    source TEXT DEFAULT 'user_correction',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(user_id, food_name)
+);
+CREATE INDEX IF NOT EXISTS idx_user_food_memory_user ON user_food_memory(user_id);
+
+-- Identity quote history (deduplication)
+CREATE TABLE IF NOT EXISTS identity_quotes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    quote TEXT NOT NULL,
+    date DATE NOT NULL DEFAULT CURRENT_DATE,
+    context_type TEXT DEFAULT 'daily',
+    UNIQUE(user_id, date)
+);
+
+-- Grace days tracking
+CREATE TABLE IF NOT EXISTS grace_days (
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    week_start DATE NOT NULL,
+    days_used INT DEFAULT 0,
+    max_per_week INT DEFAULT 2,
+    PRIMARY KEY (user_id, week_start)
+);
+
+-- Implementation intentions (if-then plans)
+CREATE TABLE IF NOT EXISTS implementation_intentions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    meal_type TEXT NOT NULL,
+    trigger_text TEXT NOT NULL,
+    action_text TEXT NOT NULL,
+    notification_time TIME,
+    enabled BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_implementation_intentions_user ON implementation_intentions(user_id);
+
+-- Stripe subscriptions (cloud only)
+CREATE TABLE IF NOT EXISTS subscriptions (
+    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    stripe_customer_id TEXT,
+    stripe_subscription_id TEXT,
+    status TEXT DEFAULT 'trialing',
+    current_period_end TIMESTAMPTZ,
+    plan TEXT DEFAULT 'free'
+);
+
+-- Expo push tokens
+CREATE TABLE IF NOT EXISTS expo_push_tokens (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token TEXT NOT NULL,
+    platform TEXT NOT NULL CHECK (platform IN ('ios', 'android')),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(user_id, token)
+);
+CREATE INDEX IF NOT EXISTS idx_expo_push_tokens_user ON expo_push_tokens(user_id);
+
+-- App settings for plan-tier model overrides
+INSERT INTO app_settings (key, value) VALUES ('model_vision_free', '') ON CONFLICT (key) DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('model_primary_free', '') ON CONFLICT (key) DO NOTHING;
