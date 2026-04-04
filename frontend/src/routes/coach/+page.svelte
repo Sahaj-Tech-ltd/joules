@@ -39,6 +39,7 @@
   let loadingHistory = $state(true);
   let messagesContainer: HTMLDivElement | undefined = $state();
   let sidebarOpen = $state(false);
+  let isNewChat = $state(false);
 
   function groupConversations(messages: ChatMessage[]): Conversation[] {
     if (messages.length === 0) return [];
@@ -89,13 +90,14 @@
 
   function startNewChat() {
     activeConversation = null;
+    isNewChat = true;
     displayMessages = [];
     sidebarOpen = false;
   }
 
   function refreshConversations() {
     conversations = groupConversations(allMessages);
-    if (conversations.length > 0 && !activeConversation) {
+    if (conversations.length > 0 && !activeConversation && !isNewChat) {
       selectConversation(conversations[0]);
     }
   }
@@ -155,6 +157,7 @@
       }];
       allMessages.unshift(optimistic);
       allMessages.unshift({ id: res.id, role: 'assistant', content: res.content, created_at: res.created_at });
+      isNewChat = false;
       refreshConversations();
       checkAchievements();
     } catch {
