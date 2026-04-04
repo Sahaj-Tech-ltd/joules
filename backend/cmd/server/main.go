@@ -31,9 +31,12 @@ import (
 	"joules/internal/export"
 	"joules/internal/fasting"
 	"joules/internal/favorites"
+	"joules/internal/foodmemory"
 	"joules/internal/foods"
 	"joules/internal/groups"
 	"joules/internal/habits"
+	"joules/internal/identity"
+	"joules/internal/intentions"
 	"joules/internal/meal"
 	"joules/internal/notify"
 	"joules/internal/recipe"
@@ -159,11 +162,14 @@ func main() {
 	srv := &http.Server{}
 	adminHandler := admin.NewHandler(pool, cfg.RequireApproval, cfg, aiClient, srv)
 	notifySvc := notify.NewService(queries, pool, cfg)
-	notifyHandler := notify.NewHandler(queries, notifySvc, cfg)
+	notifyHandler := notify.NewHandler(queries, pool, notifySvc, cfg)
 	stepsHandler := steps.NewHandler(queries, pool, cfg)
 	groupsHandler := groups.NewHandler(queries, pool)
 	habitsHandler := habits.NewHandler(queries, pool)
 	favoritesHandler := favorites.NewHandler(queries, pool)
+	identityHandler := identity.NewHandler(queries, pool, aiClient)
+	intentionsHandler := intentions.NewHandler(queries, pool)
+	foodMemoryHandler := foodmemory.NewHandler(queries, pool)
 
 	// Start notification scheduler in background
 	schedCtx, schedCancel := context.WithCancel(context.Background())
@@ -382,6 +388,7 @@ func main() {
 				r.Get("/preferences", notifyHandler.GetPreferences)
 				r.Put("/preferences", notifyHandler.SavePreferences)
 				r.Post("/test", notifyHandler.SendTest)
+				r.Post("/register-expo", notifyHandler.RegisterExpoPush)
 			})
 		})
 
@@ -403,7 +410,26 @@ func main() {
 		r.Route("/habits", func(r chi.Router) {
 			r.Use(auth.JWTMiddleware(cfg.JWTSecret))
 			r.Get("/summary", habitsHandler.GetSummary)
+			r.Get("/phase", habitsHandler.GetPhase)
 			r.Post("/checkin", habitsHandler.Checkin)
+		})
+
+		r.Route("/identity", func(r chi.Router) {
+			r.Use(auth.JWTMiddleware(cfg.JWTSecret))
+			r.Get("/quote", identityHandler.GetQuote)
+		})
+
+		r.Route("/intentions", func(r chi.Router) {
+			r.Use(auth.JWTMiddleware(cfg.JWTSecret))
+			r.Get("/", intentionsHandler.List)
+			r.Post("/", intentionsHandler.Create)
+			r.Put("/{id}", intentionsHandler.Update)
+			r.Delete("/{id}", intentionsHandler.Delete)
+		})
+
+		r.Route("/food-memory", func(r chi.Router) {
+			r.Use(auth.JWTMiddleware(cfg.JWTSecret))
+			r.Get("/", foodMemoryHandler.List)
 		})
 	})
 

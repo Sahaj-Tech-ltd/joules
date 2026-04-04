@@ -8,19 +8,21 @@ import (
 
 	"fmt"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"joules/internal/auth"
 	"joules/internal/config"
 	"joules/internal/db/sqlc"
 )
 
 type Handler struct {
-	q   *sqlc.Queries
-	svc *Service
-	cfg *config.Config
+	q    *sqlc.Queries
+	pool *pgxpool.Pool
+	svc  *Service
+	cfg  *config.Config
 }
 
-func NewHandler(q *sqlc.Queries, svc *Service, cfg *config.Config) *Handler {
-	return &Handler{q: q, svc: svc, cfg: cfg}
+func NewHandler(q *sqlc.Queries, pool *pgxpool.Pool, svc *Service, cfg *config.Config) *Handler {
+	return &Handler{q: q, pool: pool, svc: svc, cfg: cfg}
 }
 
 type apiResponse struct {
@@ -247,4 +249,42 @@ func (h *Handler) SendTest(w http.ResponseWriter, r *http.Request) {
 		Tag:   "test",
 	})
 	writeJSON(w, http.StatusOK, apiResponse{Data: map[string]string{"status": "sent"}})
+}
+
+type registerExpoPushReq struct {
+	Token    string `json:"token"`
+	Platform string `json:"platform"`
+}
+
+func (h *Handler) RegisterExpoPush(w http.ResponseWriter, r *http.Request) {
+	uid, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
+
+	var req registerExpoPushReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if req.Token == "" {
+		writeError(w, http.StatusBadRequest, errors.New("token is required"))
+		return
+	}
+	if req.Platform != "ios" && req.Platform != "android" {
+		writeError(w, http.StatusBadRequest, errors.New("platform must be 'ios' or 'android'"))
+		return
+	}
+
+	_, err = h.pool.Exec(r.Context(),
+		`INSERT INTO expo_push_tokens (user_id, token, platform) VALUES ($1, $2, $3)
+		 ON CONFLICT (user_id, token) DO UPDATE SET platform = $3`,
+		uid, req.Token, req.Platform)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, apiResponse{Data: map[string]string{"status": "registered"}})
 }

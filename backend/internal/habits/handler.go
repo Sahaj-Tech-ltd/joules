@@ -309,6 +309,98 @@ func (h *Handler) Checkin(w http.ResponseWriter, r *http.Request) {
 	}})
 }
 
+type phaseResponse struct {
+	Phase                 string  `json:"phase"`
+	DaysInPhase           int     `json:"days_in_phase"`
+	TotalDays             int     `json:"total_days"`
+	NextPhaseDate         string  `json:"next_phase_date"`
+	ConsistencyPct        float64 `json:"consistency_percentage"`
+	GraceDaysUsedThisWeek int     `json:"grace_days_used_this_week"`
+	GraceDaysMaxPerWeek   int     `json:"grace_days_max_per_week"`
+}
+
+var phaseOrder = []string{"scaffolding", "building", "strengthening", "thriving"}
+var phaseDuration = map[string]int{
+	"scaffolding":   14,
+	"building":      14,
+	"strengthening": 14,
+	"thriving":      -1,
+}
+
+func (h *Handler) GetPhase(w http.ResponseWriter, r *http.Request) {
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
+	ctx := r.Context()
+	now := time.Now().UTC()
+
+	var currentPhase string
+	var phaseUpdatedAt *time.Time
+	err = h.pool.QueryRow(ctx,
+		`SELECT current_phase, phase_updated_at FROM user_stats WHERE user_id = $1`,
+		userID).Scan(&currentPhase, &phaseUpdatedAt)
+	if err != nil && !isNoRows(err) {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("get phase: %w", err))
+		return
+	}
+	if currentPhase == "" {
+		currentPhase = "scaffolding"
+	}
+
+	var daysInPhase int
+	if phaseUpdatedAt != nil {
+		daysInPhase = int(now.Sub(*phaseUpdatedAt).Hours() / 24)
+	}
+
+	var firstMealDate *time.Time
+	_ = h.pool.QueryRow(ctx,
+		`SELECT MIN(timestamp) FROM meals WHERE user_id = $1`,
+		userID).Scan(&firstMealDate)
+
+	totalDays := 1
+	if firstMealDate != nil {
+		totalDays = int(now.Sub(*firstMealDate).Hours()/24) + 1
+	}
+
+	var daysWithMeals int
+	_ = h.pool.QueryRow(ctx,
+		`SELECT COUNT(DISTINCT timestamp::date)::int FROM meals WHERE user_id = $1 AND timestamp >= $2`,
+		userID, firstMealDate).Scan(&daysWithMeals)
+
+	consistencyPct := 0.0
+	if totalDays > 0 {
+		consistencyPct = float64(daysWithMeals) / float64(totalDays) * 100
+	}
+
+	dur := phaseDuration[currentPhase]
+	nextPhaseDate := ""
+	if dur > 0 && phaseUpdatedAt != nil {
+		nextPhaseDate = phaseUpdatedAt.AddDate(0, 0, dur).Format(time.RFC3339)
+	}
+
+	weekStart := now.AddDate(0, 0, -int(now.Weekday()))
+	weekStartStr := weekStart.Format("2006-01-02")
+
+	var graceUsed int
+	var graceMax int
+	graceMax = 2
+	_ = h.pool.QueryRow(ctx,
+		`SELECT COALESCE(days_used, 0), COALESCE(max_per_week, 2) FROM grace_days WHERE user_id = $1 AND week_start = $2`,
+		userID, weekStartStr).Scan(&graceUsed, &graceMax)
+
+	writeJSON(w, http.StatusOK, apiResponse{Data: phaseResponse{
+		Phase:                 currentPhase,
+		DaysInPhase:           daysInPhase,
+		TotalDays:             totalDays,
+		NextPhaseDate:         nextPhaseDate,
+		ConsistencyPct:        consistencyPct,
+		GraceDaysUsedThisWeek: graceUsed,
+		GraceDaysMaxPerWeek:   graceMax,
+	}})
+}
+
 func isNoRows(err error) bool {
 	return err == pgx.ErrNoRows
 }
