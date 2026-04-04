@@ -148,7 +148,7 @@
 <!-- Mobile bottom nav -->
 <nav class="lg:hidden fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card/85 backdrop-blur-xl flex items-stretch"
   style="height: calc(4rem + env(safe-area-inset-bottom, 0px)); padding-bottom: env(safe-area-inset-bottom, 0px);">
-  {#each mobileNav as item}
+  {#each mobileNav.filter(n => n.id !== 'log' || activePage !== 'log') as item}
     {@const active = activePage === item.id}
     {@const gated = item.id === 'coach'}
     {#if !gated || $features[item.id]}

@@ -101,6 +101,11 @@
   let removeFromYesterday = $state(true);
   let carryingOver = $state(false);
 
+  let showConfirmModal = $state(false);
+  let aiFoods = $state<FoodItem[]>([]);
+  let aiLoading = $state(false);
+  let aiError = $state('');
+
   let favorites = $state<Array<{id: string; name: string; calories: number; protein_g: number; carbs_g: number; fat_g: number; fiber_g: number; serving_size: string; source: string}>>([]);
   let showFavorites = $state(false);
 
@@ -406,14 +411,63 @@
   }
 
   async function handleSubmit() {
+    if (photoBase64 && foods.length === 0) {
+      aiLoading = true;
+      aiError = '';
+      try {
+        const result = await api.post<FoodItem[]>('/meals/identify', {
+          photo: photoBase64,
+          portion_hint: portionHint || null,
+        });
+        if (result && result.length > 0) {
+          aiFoods = result;
+          showConfirmModal = true;
+        } else {
+          aiError = 'Could not identify any food in the photo. Try adding foods manually.';
+        }
+      } catch (err) {
+        aiError = err instanceof Error ? err.message : 'Failed to identify food';
+      } finally {
+        aiLoading = false;
+      }
+      return;
+    }
+
     loading = true;
     error = '';
     try {
       await api.post('/meals', {
         meal_type: mealType,
-        photo: photoBase64 || null,
         note: note || null,
-        portion_hint: portionHint || null,
+        foods: foods.map(f => ({
+          name: f.name,
+          calories: f.calories,
+          protein_g: f.protein_g,
+          carbs_g: f.carbs_g,
+          fat_g: f.fat_g,
+          fiber_g: f.fiber_g,
+          serving_size: f.serving_size
+        }))
+      });
+      goto('/dashboard');
+    } catch (err) {
+      error = err instanceof Error ? err.message : 'Failed to log meal';
+    } finally {
+      loading = false;
+    }
+  }
+
+  async function confirmAndSubmit() {
+    foods = [...aiFoods];
+    showConfirmModal = false;
+    photoBase64 = null;
+    photoPreview = null;
+    loading = true;
+    error = '';
+    try {
+      await api.post('/meals', {
+        meal_type: mealType,
+        note: note || null,
         foods: foods.map(f => ({
           name: f.name,
           calories: f.calories,
@@ -959,10 +1013,10 @@
           <button
             type="button"
             onclick={handleSubmit}
-            disabled={!canSubmit}
+            disabled={!canSubmit || aiLoading}
             class="w-full rounded-2xl bg-primary px-4 py-3.5 text-base font-semibold text-primary-foreground hover:bg-primary/80 disabled:opacity-50 disabled:cursor-not-allowed transition active:scale-[0.98]"
           >
-            {loading ? 'Logging...' : 'Log Meal'}
+            {aiLoading ? 'Identifying...' : loading ? 'Logging...' : 'Log Meal'}
           </button>
         </div>
       </div>
@@ -1191,6 +1245,107 @@
           </div>
         </div>
       </div>
+    </div>
+  {/if}
+
+  {#if showConfirmModal}
+    <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div class="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl max-h-[85vh] overflow-y-auto">
+        <h2 class="text-lg font-bold text-foreground mb-1">AI Identified Foods</h2>
+        <p class="text-xs text-muted-foreground mb-4">Review and edit before logging</p>
+
+        <div class="space-y-3">
+          {#each aiFoods as food, i}
+            <div class="rounded-xl border border-border bg-secondary/50 p-3 space-y-2">
+              <div class="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={food.name}
+                  oninput={(e) => { aiFoods[i] = { ...aiFoods[i], name: (e.target as HTMLInputElement).value }; aiFoods = [...aiFoods]; }}
+                  class="flex-1 rounded-lg border border-border bg-card px-2.5 py-1.5 text-sm text-foreground"
+                />
+                <button
+                  type="button"
+                  onclick={() => { aiFoods = aiFoods.filter((_, j) => j !== i); }}
+                  class="rounded-lg border border-border px-2 py-1.5 text-xs text-muted-foreground hover:text-destructive"
+                >Remove</button>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="text-[10px] text-muted-foreground">Calories</label>
+                  <input
+                    type="number"
+                    value={food.calories}
+                    oninput={(e) => { aiFoods[i] = { ...aiFoods[i], calories: Number((e.target as HTMLInputElement).value) || 0 }; aiFoods = [...aiFoods]; }}
+                    class="w-full rounded-lg border border-border bg-card px-2 py-1 text-xs text-foreground"
+                  />
+                </div>
+                <div>
+                  <label class="text-[10px] text-muted-foreground">Protein (g)</label>
+                  <input
+                    type="number"
+                    value={food.protein_g}
+                    oninput={(e) => { aiFoods[i] = { ...aiFoods[i], protein_g: Number((e.target as HTMLInputElement).value) || 0 }; aiFoods = [...aiFoods]; }}
+                    class="w-full rounded-lg border border-border bg-card px-2 py-1 text-xs text-foreground"
+                  />
+                </div>
+                <div>
+                  <label class="text-[10px] text-muted-foreground">Carbs (g)</label>
+                  <input
+                    type="number"
+                    value={food.carbs_g}
+                    oninput={(e) => { aiFoods[i] = { ...aiFoods[i], carbs_g: Number((e.target as HTMLInputElement).value) || 0 }; aiFoods = [...aiFoods]; }}
+                    class="w-full rounded-lg border border-border bg-card px-2 py-1 text-xs text-foreground"
+                  />
+                </div>
+                <div>
+                  <label class="text-[10px] text-muted-foreground">Fat (g)</label>
+                  <input
+                    type="number"
+                    value={food.fat_g}
+                    oninput={(e) => { aiFoods[i] = { ...aiFoods[i], fat_g: Number((e.target as HTMLInputElement).value) || 0 }; aiFoods = [...aiFoods]; }}
+                    class="w-full rounded-lg border border-border bg-card px-2 py-1 text-xs text-foreground"
+                  />
+                </div>
+              </div>
+            </div>
+          {/each}
+        </div>
+
+        <div class="mt-4 flex items-center justify-between text-sm font-medium text-foreground">
+          <span>Total</span>
+          <span>{aiFoods.reduce((s, f) => s + f.calories, 0)} kcal</span>
+        </div>
+
+        <div class="mt-4 flex gap-3">
+          <button
+            type="button"
+            onclick={() => { showConfirmModal = false; }}
+            class="flex-1 rounded-xl border border-border bg-card px-4 py-2.5 text-sm font-medium text-foreground hover:bg-accent/50"
+          >Cancel</button>
+          <button
+            type="button"
+            onclick={confirmAndSubmit}
+            class="flex-1 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          >Log Meal</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if aiLoading}
+    <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div class="rounded-2xl border border-border bg-card p-8 flex flex-col items-center gap-4">
+        <div class="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
+        <p class="text-sm text-foreground">Identifying foods...</p>
+      </div>
+    </div>
+  {/if}
+
+  {#if aiError}
+    <div class="fixed bottom-24 left-4 right-4 z-[100] rounded-xl bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive flex items-center justify-between">
+      <span>{aiError}</span>
+      <button type="button" onclick={() => { aiError = ''; }} class="ml-2 text-destructive/60 hover:text-destructive">✕</button>
     </div>
   {/if}
 {/if}

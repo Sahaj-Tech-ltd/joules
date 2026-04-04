@@ -268,6 +268,7 @@ func main() {
 
 		r.Route("/meals", func(r chi.Router) {
 			r.Use(auth.JWTMiddleware(cfg.JWTSecret))
+			r.Post("/identify", mealHandler.IdentifyFood)
 			r.Post("/", mealHandler.CreateMeal)
 			r.Get("/", mealHandler.GetMealsByDate)
 			r.Get("/recent", mealHandler.GetRecentMeals)

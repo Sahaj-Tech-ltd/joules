@@ -239,6 +239,41 @@ func scanMealsWithFoods(rows pgx.Rows) ([]MealResponse, error) {
 	return result, nil
 }
 
+func (h *Handler) IdentifyFood(w http.ResponseWriter, r *http.Request) {
+	userID, err := getUserID(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
+
+	var req struct {
+		Photo       string `json:"photo"`
+		PortionHint string `json:"portion_hint"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if req.Photo == "" {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("photo is required"))
+		return
+	}
+
+	imageBytes, _, err := decodePhotoData(req.Photo, userID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid photo: %w", err))
+		return
+	}
+
+	foods, err := h.identifyFoodFromPhoto(imageBytes, req.PortionHint, userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("food identification failed: %w", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, apiResponse{Data: foods})
+}
+
 func (h *Handler) CreateMeal(w http.ResponseWriter, r *http.Request) {
 	var req CreateMealRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

@@ -22,6 +22,17 @@ type OpenAIClient struct {
 	prompts         map[string]string
 }
 
+func normalizeBaseURL(baseURL string) string {
+	baseURL = strings.TrimRight(baseURL, "/")
+	for _, suffix := range []string{"/chat/completions", "/v1/openai", "/v1"} {
+		if strings.HasSuffix(baseURL, suffix) {
+			baseURL = strings.TrimSuffix(baseURL, suffix)
+			break
+		}
+	}
+	return baseURL
+}
+
 func newOpenAIClient(apiKey, model, visionModel, ocrModel, classifierModel, baseURL string, prompts map[string]string) *OpenAIClient {
 	if model == "" {
 		model = "gpt-5.4-mini-2026-03-17"
@@ -29,6 +40,7 @@ func newOpenAIClient(apiKey, model, visionModel, ocrModel, classifierModel, base
 	if baseURL == "" {
 		baseURL = "https://api.openai.com"
 	}
+	baseURL = normalizeBaseURL(baseURL)
 	return &OpenAIClient{
 		apiKey:          apiKey,
 		model:           model,
@@ -275,14 +287,16 @@ const openaiSystemPrompt = `You are a nutrition analysis assistant. Your only jo
 Instructions:
 - Identify every distinct food or drink item visible in the image.
 - OCR priority: If the image contains any text — nutrition labels, ingredient lists, menu items, restaurant receipts, product packaging, barcode labels — READ that text first and use it as the ground truth for nutrition values. Text data is always more accurate than visual estimation.
-- For packaged items: read the Nutrition Facts panel if visible. Use the exact values for calories, protein, carbs, fat, and fiber from the label.
-- For menus or receipts: read the dish names and use those exact names for identification.
-- Estimate portion size using visual cues: plate diameter, hand size, packaging volume, context clues. If the user provides a portion description, use it as the primary reference.
-- For restaurant or takeaway food, assume a standard restaurant serving unless told otherwise.
-- For homemade food, estimate conservatively.
+- For packaged items: read the Nutrition Facts panel if visible. Use the exact values for calories, protein, carbs, fat, and fiber from the label. Use the serving size stated on the label.
+- For menus or receipts: read the dish names and use those exact names for identification. Look for portion descriptors (small, regular, large, combo).
+- Estimate portion size using visual cues: plate diameter (standard dinner plate = 10-11 inches), hand size reference, packaging volume, bowl depth. A typical restaurant serving is 1.5-2x a home serving.
+- For restaurant or takeaway food: assume a FULL standard restaurant serving. A restaurant bagel is ~300g (not 100g). A sandwich with cream cheese assumes at least 2 tablespoons of spread. A restaurant pasta dish is typically 350-450g cooked.
+- When uncertain about portions: estimate on the HIGHER end. It is better to slightly overestimate than significantly underestimate.
+- For multi-component meals (e.g., burger + fries, thali with multiple items), list each component as a separate food item with its own nutrition estimate.
+- If you see condiments, sauces, or toppings that are clearly present, include them (e.g., ketchup on fries, mayo on sandwich, cheese on top of a dish).
 - Return ONLY a raw JSON array — no markdown, no code fences, no explanation text.
 - Each element: { "name": string, "calories": number, "protein_g": number, "carbs_g": number, "fat_g": number, "fiber_g": number, "serving_size": string, "confidence": number (0-1) }
-- confidence: 0.95+ for values read directly from a nutrition label, 0.6-0.8 for estimated portions, below 0.5 for unclear items.
+- confidence: 0.95+ for values read directly from a nutrition label, 0.7-0.9 for well-identified restaurant items with clear portions, 0.5-0.7 for estimated portions with some uncertainty, below 0.5 for unclear items.
 - If no food is visible, return [].`
 
 func (c *OpenAIClient) IdentifyFood(imageData []byte, hint string) ([]IdentifiedFood, error) {
