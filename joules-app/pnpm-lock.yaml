@@ -15,11 +15,34 @@ importers:
         specifier: ^6.0.2
         version: 6.0.2
 
-  packages/api-client: {}
+  packages/api-client:
+    dependencies:
+      '@tanstack/react-query':
+        specifier: ^5.60.0
+        version: 5.96.2(react@19.2.4)
+      zustand:
+        specifier: ^5.0.0
+        version: 5.0.12(react@19.2.4)
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
 
-  packages/ui: {}
+  packages/ui:
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
 
 packages:
+
+  '@tanstack/query-core@5.96.2':
+    resolution: {integrity: sha512-hzI6cTVh4KNRk8UtoIBS7Lv9g6BnJPXvBKsvYH1aGWvv0347jT3BnSvztOE+kD76XGvZnRC/t6qdW1CaIfwCeA==}
+
+  '@tanstack/react-query@5.96.2':
+    resolution: {integrity: sha512-sYyzzJT4G0g02azzJ8o55VFFV31XvFpdUpG+unxS0vSaYsJnSPKGoI6WdPwUucJL1wpgGfwfmntNX/Ub1uOViA==}
+    peerDependencies:
+      react: ^18 || ^19
 
   '@turbo/darwin-64@2.9.3':
     resolution: {integrity: sha512-P8foouaP+y/p+hhEGBoZpzMbpVvUMwPjDpcy6wN7EYfvvyISD1USuV27qWkczecihwuPJzQ1lDBuL8ERcavTyg==}
@@ -51,8 +74,17 @@ packages:
     cpu: [arm64]
     os: [win32]
 
+  react@19.2.4:
+    resolution: {integrity: sha512-9nfp2hYpCwOjAN+8TZFGhtWEwgvWHXqESH8qT89AT/lWklpLON22Lc8pEtnpsZz7VmawabSU0gCjnj8aC0euHQ==}
+    engines: {node: '>=0.10.0'}
+
   turbo@2.9.3:
     resolution: {integrity: sha512-J/VUvsGRykPb9R8Kh8dHVBOqioDexLk9BhLCU/ZybRR+HN9UR3cURdazFvNgMDt9zPP8TF6K73Z+tplfmi0PqQ==}
+    hasBin: true
+
+  typescript@5.9.3:
+    resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
+    engines: {node: '>=14.17'}
     hasBin: true
 
   typescript@6.0.2:
@@ -60,7 +92,32 @@ packages:
     engines: {node: '>=14.17'}
     hasBin: true
 
+  zustand@5.0.12:
+    resolution: {integrity: sha512-i77ae3aZq4dhMlRhJVCYgMLKuSiZAaUPAct2AksxQ+gOtimhGMdXljRT21P5BNpeT4kXlLIckvkPM029OljD7g==}
+    engines: {node: '>=12.20.0'}
+    peerDependencies:
+      '@types/react': '>=18.0.0'
+      immer: '>=9.0.6'
+      react: '>=18.0.0'
+      use-sync-external-store: '>=1.2.0'
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true
+      immer:
+        optional: true
+      react:
+        optional: true
+      use-sync-external-store:
+        optional: true
+
 snapshots:
+
+  '@tanstack/query-core@5.96.2': {}
+
+  '@tanstack/react-query@5.96.2(react@19.2.4)':
+    dependencies:
+      '@tanstack/query-core': 5.96.2
+      react: 19.2.4
 
   '@turbo/darwin-64@2.9.3':
     optional: true
@@ -80,6 +137,8 @@ snapshots:
   '@turbo/windows-arm64@2.9.3':
     optional: true
 
+  react@19.2.4: {}
+
   turbo@2.9.3:
     optionalDependencies:
       '@turbo/darwin-64': 2.9.3
@@ -89,4 +148,10 @@ snapshots:
       '@turbo/windows-64': 2.9.3
       '@turbo/windows-arm64': 2.9.3
 
+  typescript@5.9.3: {}
+
   typescript@6.0.2: {}
+
+  zustand@5.0.12(react@19.2.4):
+    optionalDependencies:
+      react: 19.2.4
