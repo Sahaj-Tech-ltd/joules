@@ -157,12 +157,12 @@ func (h *Handler) CheckAchievements(w http.ResponseWriter, r *http.Request) {
 		{"streak_30", "Monthly Master", "Logged meals for 30 consecutive days", "consistency", false, 0, 30},
 		{"streak_100", "Centurion", "Logged meals for 100 consecutive days", "consistency", false, 0, 0},
 
-		{"calorie_goal", "On Target", "Hit your daily calorie goal", "nutrition", len(meals) > 0 && hasSummary && hasGoals && goals.DailyCalorieTarget > 0 && summary.TotalCalories >= goals.DailyCalorieTarget, 0, 0},
-		{"protein_goal", "Protein Power", "Hit your daily protein goal", "nutrition", len(meals) > 0 && hasSummary && hasGoals && goals.DailyProteinG > 0 && summary.TotalProtein >= float64(goals.DailyProteinG), 0, 0},
-		{"perfect_day", "Perfect Day", "Hit both calorie and protein goals in one day", "nutrition", len(meals) > 0 && hasSummary && hasGoals && goals.DailyCalorieTarget > 0 && summary.TotalCalories >= goals.DailyCalorieTarget && goals.DailyProteinG > 0 && summary.TotalProtein >= float64(goals.DailyProteinG), 0, 0},
-		{"low_carb_day", "Low Carb Day", "Stayed under 50g carbs for the day", "nutrition", len(meals) > 0 && hasSummary && summary.TotalCarbs < 50, 0, 0},
-		{"high_protein_day", "Protein Beast", "Consumed over 150g protein in a day", "nutrition", len(meals) > 0 && hasSummary && summary.TotalProtein >= 150, 0, 0},
-		{"fiber_champion", "Fiber Champion", "Consumed over 30g fiber in a day", "nutrition", len(meals) > 0 && hasSummary && summary.TotalFiber >= 30, 0, 0},
+		{"calorie_goal", "On Target", "Hit your daily calorie goal", "nutrition", hasSummary && hasGoals && goals.DailyCalorieTarget > 0 && summary.TotalCalories >= goals.DailyCalorieTarget, 0, 0},
+		{"protein_goal", "Protein Power", "Hit your daily protein goal", "nutrition", hasSummary && hasGoals && goals.DailyProteinG > 0 && summary.TotalProtein >= float64(goals.DailyProteinG), 0, 0},
+		{"perfect_day", "Perfect Day", "Hit both calorie and protein goals in one day", "nutrition", hasSummary && hasGoals && goals.DailyCalorieTarget > 0 && summary.TotalCalories >= goals.DailyCalorieTarget && goals.DailyProteinG > 0 && summary.TotalProtein >= float64(goals.DailyProteinG), 0, 0},
+		{"low_carb_day", "Low Carb Day", "Stayed under 50g carbs for the day", "nutrition", hasSummary && len(meals) > 0 && summary.TotalCarbs < 50, 0, 0},
+		{"high_protein_day", "Protein Beast", "Consumed over 150g protein in a day", "nutrition", hasSummary && summary.TotalProtein >= 150, 0, 0},
+		{"fiber_champion", "Fiber Champion", "Consumed over 30g fiber in a day", "nutrition", hasSummary && summary.TotalFiber >= 30, 0, 0},
 
 		{"water_goal", "Hydrated", "Drank 2500ml+ in a day", "water", hasSummary && summary.TotalWaterMl >= 2500, 0, 0},
 		{"water_3l", "Waterfall", "Drank 3000ml+ in a day", "water", hasSummary && summary.TotalWaterMl >= 3000, 0, 0},

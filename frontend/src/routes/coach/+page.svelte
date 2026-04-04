@@ -102,6 +102,7 @@
       selectConversation(conversations[0]);
     }
   }
+  }
 
   function scrollToBottom() {
     if (messagesContainer) {
