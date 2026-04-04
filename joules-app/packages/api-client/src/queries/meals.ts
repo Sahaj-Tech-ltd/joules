@@ -1,5 +1,5 @@
 import { api } from '../api';
-import type { Meal, MealIdentifyResponse, FoodItem } from '../types';
+import type { Meal, MealIdentifyResponse, FoodItem, FoodSearchResult } from '../types';
 
 export function fetchMeals(date?: string): Promise<Meal[]> {
   const query = date ? `?date=${encodeURIComponent(date)}` : '';
@@ -11,8 +11,18 @@ export function fetchRecentMeals(limit?: number): Promise<Meal[]> {
   return api.get<Meal[]>(`/meals/recent${query}`);
 }
 
-export function identifyMeal(photo: FormData): Promise<MealIdentifyResponse> {
-  return api.upload<MealIdentifyResponse>('/meals/identify', photo);
+export function identifyMealFromPhoto(photo: string, portionHint?: string): Promise<MealIdentifyResponse> {
+  return api.post<MealIdentifyResponse>('/meals/identify', {
+    photo,
+    portion_hint: portionHint || null,
+  });
+}
+
+export function identifyMealFromText(text: string, portionHint?: string): Promise<MealIdentifyResponse> {
+  return api.post<MealIdentifyResponse>('/meals/identify', {
+    photo: text,
+    portion_hint: portionHint || null,
+  });
 }
 
 export function createMeal(meal: {
@@ -20,6 +30,7 @@ export function createMeal(meal: {
   foods: Partial<FoodItem>[];
   note?: string;
   timestamp?: string;
+  photo?: string;
 }): Promise<Meal> {
   return api.post<Meal>('/meals/', meal);
 }
@@ -42,4 +53,10 @@ export function deleteFoodItem(mealId: string, foodId: string): Promise<void> {
 
 export function carryForward(foods: Partial<FoodItem>[], mealType: string): Promise<Meal> {
   return api.post<Meal>('/meals/carry-forward', { foods, meal_type: mealType });
+}
+
+export function searchFoods(query: string, limit?: number): Promise<FoodSearchResult[]> {
+  const params = new URLSearchParams({ q: query });
+  if (limit) params.set('limit', String(limit));
+  return api.get<FoodSearchResult[]>(`/foods/search?${params.toString()}`);
 }

@@ -40,6 +40,21 @@ export interface FoodMemoryEntry {
   source: string;
 }
 
+export interface FoodSearchResult {
+  id?: number;
+  barcode?: string;
+  name: string;
+  brand?: string;
+  calories: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+  fiber_g: number;
+  serving_size: string;
+  ingredients?: string;
+  source: string;
+}
+
 export interface FoodFavorite {
   id: string;
   name: string;
