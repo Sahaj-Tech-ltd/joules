@@ -1,9 +1,12 @@
 import { api } from '../api';
 import type { Meal, MealIdentifyResponse, FoodItem, FoodSearchResult } from '../types';
 
-export function fetchMeals(date?: string): Promise<Meal[]> {
+export async function fetchMeals(date?: string): Promise<Meal[]> {
   const query = date ? `?date=${encodeURIComponent(date)}` : '';
-  return api.get<Meal[]>(`/meals${query}`);
+  const res = await api.get<any>(`/meals${query}`);
+  if (Array.isArray(res)) return res;
+  if (res && Array.isArray(res.meals)) return res.meals;
+  return [];
 }
 
 export function fetchRecentMeals(limit?: number): Promise<Meal[]> {

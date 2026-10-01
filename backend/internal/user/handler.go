@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -214,7 +215,12 @@ func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
 
 	profile, err := h.q.GetProfile(r.Context(), userID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, fmt.Errorf("profile not found: %w", err))
+		var isAdmin bool
+		h.pool.QueryRow(r.Context(), "SELECT is_admin FROM users WHERE id = $1", userID).Scan(&isAdmin)
+		writeJSON(w, http.StatusOK, apiResponse{Data: ProfileResponse{
+			OnboardingComplete: false,
+			IsAdmin:            isAdmin,
+		}})
 		return
 	}
 
@@ -410,7 +416,21 @@ func (h *Handler) GetGoals(w http.ResponseWriter, r *http.Request) {
 
 	goals, err := h.q.GetGoals(r.Context(), userID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, fmt.Errorf("goals not found: %w", err))
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusOK, apiResponse{Data: GoalsResponse{
+				Objective:          "maintain",
+				DietPlan:           "balanced",
+				FastingWindow:      stringPtr("16:8"),
+				DailyCalorieTarget: 2000,
+				DailyProteinG:      150,
+				DailyCarbsG:        200,
+				DailyFatG:          65,
+				EatingWindowStart:  stringPtr("12:00"),
+				FastingStreak:      intPtr(0),
+			}})
+			return
+		}
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("get goals: %w", err))
 		return
 	}
 

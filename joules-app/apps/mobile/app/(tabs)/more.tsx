@@ -48,6 +48,7 @@ export default function MoreScreen() {
 
   const baseUrl = useAuthStore((s) => s.baseUrl);
   const setBaseUrl = useAuthStore((s) => s.setBaseUrl);
+  const token = useAuthStore((s) => s.token);
 
   const [serverModalVisible, setServerModalVisible] = useState(false);
   const [newServerUrl, setNewServerUrl] = useState(baseUrl);
@@ -56,30 +57,35 @@ export default function MoreScreen() {
   const { data: user } = useQuery({
     queryKey: ['currentUser'],
     queryFn: fetchCurrentUser,
+    enabled: !!token,
     staleTime: 1000 * 60 * 10,
   });
 
   const { data: profile } = useQuery({
     queryKey: ['userProfile'],
     queryFn: fetchProfile,
+    enabled: !!token,
     staleTime: 1000 * 60 * 10,
   });
 
   const { data: goals } = useQuery({
     queryKey: ['userGoals'],
     queryFn: fetchGoals,
+    enabled: !!token,
     staleTime: 1000 * 60 * 10,
   });
 
   const { data: recipes } = useQuery({
     queryKey: ['recipes-count'],
     queryFn: fetchRecipes,
+    enabled: !!token,
     staleTime: 1000 * 60 * 5,
   });
 
   const { data: favorites } = useQuery({
     queryKey: ['favorites-count'],
     queryFn: fetchFavorites,
+    enabled: !!token,
     staleTime: 1000 * 60 * 5,
   });
 

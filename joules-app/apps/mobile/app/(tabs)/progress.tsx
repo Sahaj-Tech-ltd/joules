@@ -28,6 +28,7 @@ import {
   logWeight,
   fetchFastingStatus,
   fetchGoals,
+  useAuthStore,
 } from '@joules/api-client';
 import WaterWidget from '@/components/WaterWidget';
 import StepsWidget from '@/components/StepsWidget';
@@ -43,6 +44,7 @@ export default function ProgressScreen() {
   const colorScheme = useColorScheme() ?? 'dark';
   const colors = getColors(colorScheme);
   const queryClient = useQueryClient();
+  const token = useAuthStore((s) => s.token);
 
   const [activeTab, setActiveTab] = useState<'activity' | 'body'>('activity');
   const [refreshing, setRefreshing] = useState(false);
@@ -56,31 +58,37 @@ export default function ProgressScreen() {
   const { data: waterLogs = [], refetch: refetchWater } = useQuery({
     queryKey: ['water-today'],
     queryFn: () => fetchWaterLogs(),
+    enabled: !!token,
   });
 
   const { data: stepsData, refetch: refetchSteps } = useQuery({
     queryKey: ['steps-today'],
     queryFn: () => fetchSteps(),
+    enabled: !!token,
   });
 
   const { data: exercises = [], refetch: refetchExercises } = useQuery({
     queryKey: ['exercises-today'],
     queryFn: () => fetchExercises(),
+    enabled: !!token,
   });
 
   const { data: weightLogs = [], refetch: refetchWeight } = useQuery({
     queryKey: ['weight-30d'],
     queryFn: () => fetchWeightLogs(30),
+    enabled: !!token,
   });
 
   const { data: fasting, refetch: refetchFasting } = useQuery({
     queryKey: ['fasting-status'],
     queryFn: () => fetchFastingStatus(),
+    enabled: !!token,
   });
 
   const { data: goals } = useQuery({
     queryKey: ['userGoals'],
     queryFn: fetchGoals,
+    enabled: !!token,
   });
 
   const handleRefresh = async () => {
@@ -97,7 +105,10 @@ export default function ProgressScreen() {
 
   // Water calculations
   const totalWaterMl = useMemo(() => {
-    return waterLogs.reduce((sum, log) => sum + log.amount_ml, 0);
+    if (Array.isArray(waterLogs)) {
+      return waterLogs.reduce((sum: number, log: any) => sum + (log.amount_ml || 0), 0);
+    }
+    return (waterLogs as any)?.total_ml ?? 0;
   }, [waterLogs]);
 
   const handleLogWater = async (amount: number) => {

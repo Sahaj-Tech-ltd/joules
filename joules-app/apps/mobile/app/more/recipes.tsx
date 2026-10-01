@@ -398,6 +398,13 @@ export default function RecipesScreen() {
     }
   };
 
+  const renderRecipe = useCallback(
+    ({ item }: { item: Recipe }) => (
+      <RecipeCard recipe={item} colors={colors} onDelete={handleDelete} onLog={handleLog} />
+    ),
+    [colors, handleDelete, handleLog]
+  );
+
   if (loading) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -414,13 +421,6 @@ export default function RecipesScreen() {
       </SafeAreaView>
     );
   }
-
-  const renderRecipe = useCallback(
-    ({ item }: { item: Recipe }) => (
-      <RecipeCard recipe={item} colors={colors} onDelete={handleDelete} onLog={handleLog} />
-    ),
-    [colors, handleDelete, handleLog]
-  );
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>

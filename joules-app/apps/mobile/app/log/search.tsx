@@ -17,6 +17,7 @@ import { light, dark, oled, spacing, borderRadius, fontSizes } from '@joules/ui'
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { searchFoods, fetchTopFavorites, createMeal } from '@joules/api-client';
 import type { FoodSearchResult, FoodFavorite, FoodItem } from '@joules/api-client';
+import { useQueryClient } from '@tanstack/react-query';
 
 function getColors(scheme: string) {
   if (scheme === 'dark') return dark;
@@ -47,6 +48,7 @@ export default function SearchScreen() {
   const colorScheme = useColorScheme() ?? 'dark';
   const colors = getColors(colorScheme);
   const router = useRouter();
+  const queryClient = useQueryClient();
 
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<FoodSearchResult[]>([]);
@@ -75,7 +77,7 @@ export default function SearchScreen() {
         setSearching(true);
         hasSearched.current = true;
         searchFoods(text.trim())
-          .then(setResults)
+          .then((res) => setResults(Array.isArray(res) ? res : []))
           .catch(() => setResults([]))
           .finally(() => setSearching(false));
       } else {
@@ -114,6 +116,8 @@ export default function SearchScreen() {
         source: f.source,
       }));
       await createMeal({ meal_type: mealType, foods });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['meals'] });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.back();
     } catch {

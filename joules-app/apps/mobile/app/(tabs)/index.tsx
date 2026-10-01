@@ -25,6 +25,7 @@ import {
   fetchTopFavorites,
   fetchProfile,
   createMeal,
+  useAuthStore,
 } from '@joules/api-client';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import CalorieRing from '@/components/CalorieRing';
@@ -53,42 +54,50 @@ export default function HomeScreen() {
   const colors = getColors(colorScheme);
   const router = useRouter();
   const queryClient = useQueryClient();
+  const token = useAuthStore((s) => s.token);
   const [refreshing, setRefreshing] = useState(false);
 
   const { data: profile } = useQuery({
     queryKey: ['userProfile'],
     queryFn: fetchProfile,
+    enabled: !!token,
     staleTime: 1000 * 60 * 10,
   });
 
   const { data: dashboard, isLoading: dashLoading, refetch: refetchDash } = useQuery({
     queryKey: ['dashboard'],
     queryFn: () => fetchDashboardSummary(),
+    enabled: !!token,
   });
 
   const { data: phase, refetch: refetchPhase } = useQuery({
     queryKey: ['habits-phase'],
     queryFn: fetchHabitPhase,
+    enabled: !!token,
   });
 
   const { data: weightLogs, refetch: refetchWeight } = useQuery({
     queryKey: ['weight-7d'],
     queryFn: () => fetchWeightLogs(7),
+    enabled: !!token,
   });
 
   const { data: coachMsgs, refetch: refetchCoach } = useQuery({
     queryKey: ['coach-latest'],
     queryFn: () => fetchCoachMessages(1),
+    enabled: !!token,
   });
 
   const { data: waterLogs, refetch: refetchWater } = useQuery({
     queryKey: ['water-today'],
     queryFn: () => fetchWaterLogs(),
+    enabled: !!token,
   });
 
   const { data: favorites, refetch: refetchFavorites } = useQuery({
     queryKey: ['favorites-top'],
     queryFn: () => fetchTopFavorites(6),
+    enabled: !!token,
   });
 
   const handleRefresh = async () => {
@@ -150,10 +159,13 @@ export default function HomeScreen() {
     );
   }
 
-  const consumed = dashboard?.calories_consumed ?? 0;
+  const consumed = dashboard?.total_calories ?? dashboard?.calories_consumed ?? 0;
   const target = dashboard?.calorie_target ?? 2000;
   const remaining = Math.max(0, target - consumed);
-  const waterMl = (waterLogs ?? []).reduce((acc: number, w: any) => acc + (w.amount_ml || 0), 0) || (dashboard?.water_ml ?? 0);
+  const waterData = waterLogs as any;
+  const waterMl = Array.isArray(waterData)
+    ? waterData.reduce((acc: number, w: any) => acc + (w.amount_ml || 0), 0)
+    : (waterData?.total_ml ?? dashboard?.total_water_ml ?? dashboard?.water_ml ?? 0);
   const waterTarget = 2500;
 
   return (
@@ -279,19 +291,19 @@ export default function HomeScreen() {
           <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Macronutrients</Text>
           <MacroBar
             label="Protein"
-            consumed={dashboard?.protein_consumed ?? 0}
+            consumed={dashboard?.total_protein ?? dashboard?.protein_consumed ?? 0}
             target={dashboard?.protein_target ?? 150}
             color={colors.macroProtein}
           />
           <MacroBar
             label="Carbs"
-            consumed={dashboard?.carbs_consumed ?? 0}
+            consumed={dashboard?.total_carbs ?? dashboard?.carbs_consumed ?? 0}
             target={dashboard?.carbs_target ?? 200}
             color={colors.macroCarbs}
           />
           <MacroBar
             label="Fat"
-            consumed={dashboard?.fat_consumed ?? 0}
+            consumed={dashboard?.total_fat ?? dashboard?.fat_consumed ?? 0}
             target={dashboard?.fat_target ?? 65}
             color={colors.macroFat}
           />

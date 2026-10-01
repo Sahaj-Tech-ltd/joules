@@ -2,12 +2,14 @@ package fasting
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"joules/internal/auth"
@@ -96,6 +98,17 @@ func (h *Handler) GetStatus(w http.ResponseWriter, r *http.Request) {
 
 	goals, err := h.q.GetGoals(ctx, userID)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusOK, apiResponse{Data: FastingStatusResponse{
+				IsFasting:         false,
+				EatingWindowStart: "12:00",
+				EatingWindowHours: 8,
+				FastingHours:      16,
+				FastingStreak:     0,
+				FastingWindow:     "16:8",
+			}})
+			return
+		}
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("get goals: %w", err))
 		return
 	}

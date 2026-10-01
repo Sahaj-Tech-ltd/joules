@@ -36,7 +36,7 @@ export default function LogTabScreen() {
   const loadMeals = useCallback(async () => {
     try {
       const data = await fetchMeals();
-      setMeals(data);
+      setMeals(Array.isArray(data) ? data : (data as any)?.meals ?? []);
     } catch {
       // silently fail
     } finally {

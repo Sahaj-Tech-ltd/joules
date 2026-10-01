@@ -3,7 +3,7 @@ import { View, Text, StyleSheet } from 'react-native';
 import { light, dark, oled, spacing, borderRadius, fontSizes } from '@joules/ui';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useQuery } from '@tanstack/react-query';
-import { fetchIdentityQuote } from '@joules/api-client';
+import { fetchIdentityQuote, useAuthStore } from '@joules/api-client';
 
 function getColors(scheme: string) {
   if (scheme === 'dark') return dark;
@@ -14,10 +14,12 @@ function getColors(scheme: string) {
 export default function IdentityQuoteCard() {
   const colorScheme = useColorScheme() ?? 'dark';
   const colors = getColors(colorScheme);
+  const token = useAuthStore((s) => s.token);
 
   const { data } = useQuery({
     queryKey: ['identity-quote'],
     queryFn: fetchIdentityQuote,
+    enabled: !!token,
     staleTime: 1000 * 60 * 60,
   });
 

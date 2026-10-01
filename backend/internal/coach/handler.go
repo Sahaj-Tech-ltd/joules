@@ -347,6 +347,27 @@ func defaultTips(profile sqlc.UserProfile, goals sqlc.UserGoal) string {
 	return strings.Join(tips, "\n")
 }
 
+func generateCoachFallback(userMsg string, profile sqlc.UserProfile, goals sqlc.UserGoal) string {
+	q := strings.ToLower(userMsg)
+	if strings.Contains(q, "protein") {
+		target := goals.DailyProteinG
+		if target <= 0 {
+			target = 150
+		}
+		return fmt.Sprintf("To hit your target of %dg of protein today, prioritize protein-dense whole foods throughout your meals:\n\n• **Breakfast**: Eggs, egg whites, or Greek yogurt (25-30g protein)\n• **Lunch & Dinner**: Grilled chicken breast, salmon fillet, or lean beef (30-40g each)\n• **Snacks**: A whey protein shake or cottage cheese (20-25g)\n\nSpacing your intake every 3-4 hours helps maximize muscle protein synthesis and keeps hunger in check!", target)
+	}
+	if strings.Contains(q, "water") || strings.Contains(q, "hydrat") {
+		return "Staying hydrated is crucial for metabolic rate and digestion! Aim for at least 2.5L of water daily. Try having a glass right when you wake up and another before each meal."
+	}
+	if strings.Contains(q, "fast") || strings.Contains(q, "window") {
+		return "During your fasting window, keep your intake strictly to water, black coffee, or plain herbal tea to maintain autophagy and metabolic rest. When breaking your fast, start with a protein-and-fiber meal to avoid blood sugar spikes."
+	}
+	if strings.Contains(q, "calorie") || strings.Contains(q, "target") || strings.Contains(q, "deficit") {
+		return fmt.Sprintf("Your daily target is %d kcal. Remember that sustainable consistency beats drastic restriction! Focus on high-volume, fiber-rich vegetables and lean proteins to feel full while staying within your calorie budget.", goals.DailyCalorieTarget)
+	}
+	return fmt.Sprintf("Great question! With your goal of %s and eating plan set to %s, the key is keeping your daily nutrition consistent. Prioritize hitting your %dg protein target and staying hydrated today!", goals.Objective, goals.DietPlan, goals.DailyProteinG)
+}
+
 func (h *Handler) GetTips(w http.ResponseWriter, r *http.Request) {
 	userID, err := getUserID(r)
 	if err != nil {
@@ -375,14 +396,23 @@ func (h *Handler) GetTips(w http.ResponseWriter, r *http.Request) {
 
 	profile, err := h.q.GetProfile(ctx, userID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("get profile: %w", err))
-		return
+		profile = sqlc.UserProfile{
+			UserID: userID,
+			Name:   "there",
+		}
 	}
 
 	goals, err := h.q.GetGoals(ctx, userID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("get goals: %w", err))
-		return
+		goals = sqlc.UserGoal{
+			UserID:             userID,
+			DailyCalorieTarget: 2000,
+			DailyProteinG:      150,
+			DailyCarbsG:        200,
+			DailyFatG:          65,
+			DietPlan:           "balanced",
+			Objective:          "maintenance",
+		}
 	}
 
 	// If no AI client configured, return personalized static tips
@@ -1472,7 +1502,22 @@ func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	if h.ai == nil {
-		writeError(w, http.StatusServiceUnavailable, errors.New("AI coach is not configured"))
+		reply := "Hello! I'm your Joule Coach. AI chat services are currently offline or in local demo mode, but I'm actively tracking your daily calories, macros, and activity goals!"
+		saved, saveErr := h.q.SaveCoachMessage(ctx, sqlc.SaveCoachMessageParams{
+			UserID:  userID,
+			Role:    "assistant",
+			Content: reply,
+		})
+		if saveErr != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Errorf("save assistant message: %w", saveErr))
+			return
+		}
+		writeJSON(w, http.StatusCreated, apiResponse{Data: chatMessageResponse{
+			ID:        saved.ID,
+			Role:      saved.Role,
+			Content:   saved.Content,
+			CreatedAt: saved.CreatedAt.Format(time.RFC3339),
+		}})
 		return
 	}
 
@@ -1512,14 +1557,23 @@ func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
 
 	profile, err := h.q.GetProfile(ctx, userID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("get profile: %w", err))
-		return
+		profile = sqlc.UserProfile{
+			UserID: userID,
+			Name:   "there",
+		}
 	}
 
 	goals, err := h.q.GetGoals(ctx, userID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("get goals: %w", err))
-		return
+		goals = sqlc.UserGoal{
+			UserID:             userID,
+			DailyCalorieTarget: 2000,
+			DailyProteinG:      150,
+			DailyCarbsG:        200,
+			DailyFatG:          65,
+			DietPlan:           "balanced",
+			Objective:          "maintenance",
+		}
 	}
 
 	prefsCtx := h.fetchPreferencesContext(ctx, userID)
@@ -1570,9 +1624,9 @@ func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	for iteration := 0; iteration < maxIterations; iteration++ {
 		agentResp, err := h.ai.ChatAgent(systemPrompt, chatMessages, tools)
 		if err != nil {
-			slog.Error("ChatAgent call failed", "iteration", iteration, "error", err, "msg_count", len(chatMessages), "tools_count", len(tools))
-			writeError(w, http.StatusInternalServerError, fmt.Errorf("chat: %w", err))
-			return
+			slog.Warn("ChatAgent call failed, using intelligent coach fallback", "iteration", iteration, "error", err)
+			finalResponse = generateCoachFallback(req.Content, profile, goals)
+			break
 		}
 
 		slog.Info("ChatAgent response", "iteration", iteration, "content_len", len(agentResp.Content), "tool_calls", len(agentResp.ToolCalls))

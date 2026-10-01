@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { light, dark, oled, spacing, borderRadius, fontSizes } from '@joules/ui';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { fetchCoachMessages, sendCoachMessage } from '@joules/api-client';
+import { fetchCoachMessages, sendCoachMessage, useAuthStore } from '@joules/api-client';
 import type { CoachMessage } from '@joules/api-client';
 
 function getColors(scheme: string) {
@@ -100,6 +100,7 @@ export default function CoachScreen() {
   const colorScheme = useColorScheme() ?? 'dark';
   const colors = getColors(colorScheme);
 
+  const token = useAuthStore((s) => s.token);
   const [messages, setMessages] = useState<CoachMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
@@ -113,6 +114,10 @@ export default function CoachScreen() {
   const freeRemaining = Math.max(0, DAILY_FREE_LIMIT - todayUserMessages.length);
 
   const loadMessages = useCallback(async () => {
+    if (!token) {
+      setLoading(false);
+      return;
+    }
     try {
       const data = await fetchCoachMessages(50);
       setMessages([...data].reverse());
@@ -121,7 +126,7 @@ export default function CoachScreen() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [token]);
 
   useEffect(() => {
     loadMessages();
