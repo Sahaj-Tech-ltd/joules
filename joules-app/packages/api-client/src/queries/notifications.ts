@@ -11,6 +11,9 @@ export function updateNotificationPreferences(
   return api.put<NotificationPreferences>('/notifications/preferences', prefs);
 }
 
-export function registerExpoPushToken(token: string): Promise<void> {
-  return api.post('/notifications/subscribe', { endpoint: token });
+export function registerExpoPushToken(
+  token: string,
+  platform: 'ios' | 'android' | 'web' = 'ios'
+): Promise<void> {
+  return api.post('/notifications/register-expo', { token, platform });
 }

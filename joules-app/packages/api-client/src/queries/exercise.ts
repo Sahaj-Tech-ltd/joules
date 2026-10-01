@@ -3,7 +3,7 @@ import type { ExerciseEntry } from '../types';
 
 export function fetchExercises(date?: string): Promise<ExerciseEntry[]> {
   const query = date ? `?date=${encodeURIComponent(date)}` : '';
-  return api.get<ExerciseEntry[]>(`/exercise${query}`);
+  return api.get<ExerciseEntry[]>(`/exercises${query}`);
 }
 
 export function logExercise(exercise: {
@@ -12,5 +12,5 @@ export function logExercise(exercise: {
   calories_burned?: number;
   timestamp?: string;
 }): Promise<ExerciseEntry> {
-  return api.post<ExerciseEntry>('/exercise/', exercise);
+  return api.post<ExerciseEntry>('/exercises', exercise);
 }

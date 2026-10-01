@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -84,6 +85,12 @@ func Load() (*Config, error) {
 		ClassifierAPIKey:  os.Getenv("CLASSIFIER_API_KEY"),
 		ClassifierBaseURL: os.Getenv("CLASSIFIER_BASE_URL"),
 	}
+
+	cfg.IsDev = os.Getenv("ENV") == "development" ||
+		os.Getenv("DEV") == "true" ||
+		os.Getenv("GO_ENV") == "development" ||
+		strings.HasPrefix(cfg.AppURL, "http://localhost") ||
+		strings.HasPrefix(cfg.AppURL, "http://127.0.0.1")
 
 	smtpPort := getEnv("SMTP_PORT", "587")
 	port, err := strconv.Atoi(smtpPort)

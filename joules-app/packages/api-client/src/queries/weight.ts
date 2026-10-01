@@ -7,7 +7,7 @@ export function fetchWeightLogs(days?: number): Promise<WeightLog[]> {
 }
 
 export function logWeight(weightKg: number, date?: string): Promise<WeightLog> {
-  return api.post<WeightLog>('/weight/', {
+  return api.post<WeightLog>('/weight', {
     weight_kg: weightKg,
     ...(date ? { date } : {}),
   });

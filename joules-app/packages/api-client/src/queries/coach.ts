@@ -7,7 +7,7 @@ export function fetchCoachMessages(limit?: number): Promise<CoachMessage[]> {
 }
 
 export function sendCoachMessage(message: string): Promise<CoachMessage> {
-  return api.post<CoachMessage>('/coach/chat', { message });
+  return api.post<CoachMessage>('/coach/chat', { content: message, message });
 }
 
 export function fetchCoachMemories(): Promise<CoachMemory[]> {

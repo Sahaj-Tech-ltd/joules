@@ -12,7 +12,7 @@ export function fetchSteps(date?: string): Promise<StepEntry> {
 }
 
 export function logSteps(steps: number, date?: string): Promise<StepEntry> {
-  return api.post<StepEntry>('/steps/', {
+  return api.post<StepEntry>('/steps', {
     steps,
     ...(date ? { date } : {}),
   });

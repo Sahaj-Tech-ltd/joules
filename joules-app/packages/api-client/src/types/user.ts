@@ -46,7 +46,10 @@ export interface UserPreferences {
 
 export interface AuthResponse {
   access_token: string;
-  user: User;
+  refresh_token?: string;
+  expires_at?: string;
+  must_change_password?: boolean;
+  user?: User;
 }
 
 export interface FastingStatus {

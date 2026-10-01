@@ -1,4 +1,4 @@
-import { getToken, setToken, clearToken, getBaseUrl } from './stores/auth';
+import { getToken, setToken, getRefreshToken, setRefreshToken, clearToken, getBaseUrl } from './stores/auth';
 
 async function request<T>(
   path: string,
@@ -27,15 +27,23 @@ async function request<T>(
 
   if (res.status === 401) {
     try {
+      const currentRefresh = getRefreshToken();
       const refreshed = await fetch(`${baseUrl}/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        body: currentRefresh ? JSON.stringify({ refresh_token: currentRefresh }) : undefined,
+        credentials: 'include',
       });
       if (refreshed.ok) {
         const refreshData = await refreshed.json();
-        if (refreshData.data?.access_token) {
-          setToken(refreshData.data.access_token);
-          headers['Authorization'] = `Bearer ${refreshData.data.access_token}`;
+        const newAccess = refreshData.data?.access_token;
+        const newRefresh = refreshData.data?.refresh_token;
+        if (newAccess) {
+          setToken(newAccess);
+          if (newRefresh) {
+            setRefreshToken(newRefresh);
+          }
+          headers['Authorization'] = `Bearer ${newAccess}`;
           const retryRes = await fetch(`${baseUrl}${path}`, {
             ...options,
             headers,

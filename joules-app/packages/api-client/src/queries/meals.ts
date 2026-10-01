@@ -32,7 +32,7 @@ export function createMeal(meal: {
   timestamp?: string;
   photo?: string;
 }): Promise<Meal> {
-  return api.post<Meal>('/meals/', meal);
+  return api.post<Meal>('/meals', meal);
 }
 
 export function deleteMeal(id: string): Promise<void> {

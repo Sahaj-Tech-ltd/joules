@@ -107,6 +107,7 @@ func init() {
 
 type chatMessageRequest struct {
 	Content string `json:"content"`
+	Message string `json:"message"`
 }
 
 type chatMessageResponse struct {
@@ -1447,6 +1448,10 @@ func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
+	}
+
+	if req.Content == "" && req.Message != "" {
+		req.Content = req.Message
 	}
 
 	if req.Content == "" {

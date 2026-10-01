@@ -110,6 +110,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, apiResponse{Data: LoginResponse{
 		AccessToken:        resp.AccessToken,
+		RefreshToken:       resp.RefreshToken,
 		ExpiresAt:          resp.ExpiresAt,
 		MustChangePassword: resp.MustChangePassword,
 	}})

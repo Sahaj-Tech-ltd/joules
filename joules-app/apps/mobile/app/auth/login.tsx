@@ -61,6 +61,9 @@ export default function LoginScreen() {
     try {
       const data = await loginApi(email.trim(), password);
       setToken(data.access_token);
+      if (data.refresh_token) {
+        useAuthStore.getState().setRefreshToken(data.refresh_token);
+      }
       router.replace('/(tabs)');
     } catch (err: any) {
       setError(err?.message || 'Login failed. Please try again.');

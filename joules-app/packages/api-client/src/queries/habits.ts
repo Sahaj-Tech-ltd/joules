@@ -28,22 +28,22 @@ export function habitCheckin(date?: string): Promise<void> {
 }
 
 export function fetchIntentions(): Promise<ImplementationIntention[]> {
-  return api.get<ImplementationIntention[]>('/habits/intentions');
+  return api.get<ImplementationIntention[]>('/intentions');
 }
 
 export function createIntention(
   intention: Omit<ImplementationIntention, 'id'>
 ): Promise<ImplementationIntention> {
-  return api.post<ImplementationIntention>('/habits/intentions', intention);
+  return api.post<ImplementationIntention>('/intentions', intention);
 }
 
 export function updateIntention(
   id: string,
   updates: Partial<ImplementationIntention>
 ): Promise<ImplementationIntention> {
-  return api.put<ImplementationIntention>(`/habits/intentions/${id}`, updates);
+  return api.put<ImplementationIntention>(`/intentions/${id}`, updates);
 }
 
 export function deleteIntention(id: string): Promise<void> {
-  return api.del(`/habits/intentions/${id}`);
+  return api.del(`/intentions/${id}`);
 }

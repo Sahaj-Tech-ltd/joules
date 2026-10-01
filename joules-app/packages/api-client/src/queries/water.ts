@@ -7,7 +7,7 @@ export function fetchWaterLogs(date?: string): Promise<WaterLog[]> {
 }
 
 export function logWater(amountMl: number, date?: string): Promise<WaterLog> {
-  return api.post<WaterLog>('/water/', {
+  return api.post<WaterLog>('/water', {
     amount_ml: amountMl,
     ...(date ? { date } : {}),
   });

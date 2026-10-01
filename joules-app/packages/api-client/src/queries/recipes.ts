@@ -25,11 +25,11 @@ export interface RecipeFood {
 }
 
 export function fetchRecipes(): Promise<Recipe[]> {
-  return api.get<Recipe[]>('/recipes/');
+  return api.get<Recipe[]>('/recipes');
 }
 
 export function createRecipe(recipe: Partial<Recipe>): Promise<Recipe> {
-  return api.post<Recipe>('/recipes/', recipe);
+  return api.post<Recipe>('/recipes', recipe);
 }
 
 export function deleteRecipe(id: string): Promise<void> {
