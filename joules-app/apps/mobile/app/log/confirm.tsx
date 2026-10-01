@@ -7,6 +7,7 @@ import {
   ScrollView,
   Image,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -54,10 +55,15 @@ export default function ConfirmScreen() {
   const colorScheme = useColorScheme() ?? 'dark';
   const colors = getColors(colorScheme);
   const router = useRouter();
-  const { photo, photoUri, results } = useLocalSearchParams<{ photo?: string; photoUri?: string; results?: string }>();
+  const { photo, photoUri, results, mealType: initialMealType } = useLocalSearchParams<{
+    photo?: string;
+    photoUri?: string;
+    results?: string;
+    mealType?: string;
+  }>();
 
   const [foods, setFoods] = useState<FoodItem[]>([]);
-  const [mealType, setMealType] = useState<string>(getDefaultMealType());
+  const [mealType, setMealType] = useState<string>(initialMealType || getDefaultMealType());
   const [logging, setLogging] = useState(false);
   const [identifyResult, setIdentifyResult] = useState<MealIdentifyResponse | null>(null);
 
@@ -103,8 +109,10 @@ export default function ConfirmScreen() {
 
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.replace('/(tabs)');
-    } catch {
+    } catch (err: any) {
       setLogging(false);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert('Save Failed', err?.message || 'Could not save meal. Please try again.');
     }
   };
 

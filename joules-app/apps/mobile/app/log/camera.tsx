@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Pressable, ActivityIndicator, Alert } from 'rea
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -27,25 +28,12 @@ export default function CameraScreen() {
   const [processing, setProcessing] = useState(false);
   const cameraRef = useRef<CameraView>(null);
 
-  const handleCapture = async () => {
-    if (!cameraRef.current) return;
-
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
-    const captured = await cameraRef.current.takePictureAsync({
-      quality: 0.8,
-      base64: false,
-      skipProcessing: true,
-    });
-
-    if (!captured) return;
-
+  const processImageUri = async (uri: string) => {
     setProcessing(true);
-
     try {
       const manipulated = await manipulateAsync(
-        captured.uri,
-        [{ resize: { width: 1200 } }],
+        uri,
+        [{ resize: { width: 1024 } }],
         { compress: 0.7, format: SaveFormat.JPEG, base64: true }
       );
 
@@ -83,6 +71,42 @@ export default function CameraScreen() {
     }
   };
 
+  const handleCapture = async () => {
+    if (!cameraRef.current || processing) return;
+
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    try {
+      const captured = await cameraRef.current.takePictureAsync({
+        quality: 0.8,
+        base64: false,
+        skipProcessing: true,
+      });
+
+      if (!captured?.uri) return;
+      await processImageUri(captured.uri);
+    } catch {
+      Alert.alert('Camera Error', 'Could not take picture. Try again or select from library.');
+    }
+  };
+
+  const handlePickImage = async () => {
+    if (processing) return;
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]?.uri) {
+        await processImageUri(result.assets[0].uri);
+      }
+    } catch {
+      Alert.alert('Error', 'Could not access photo library.');
+    }
+  };
+
   const handleFlip = () => {
     setFacing((prev) => (prev === 'back' ? 'front' : 'back'));
   };
@@ -102,13 +126,36 @@ export default function CameraScreen() {
   if (!permission.granted) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: '#000' }]}>
+        <View style={styles.topBar}>
+          <Pressable onPress={handleClose} style={styles.iconButton}>
+            <Ionicons name="close" size={28} color="#fff" />
+          </Pressable>
+        </View>
         <View style={styles.permissionContainer}>
           <Ionicons name="camera-outline" size={64} color="#fff" />
+          <Text style={{ color: '#fff', fontSize: 18, fontWeight: '600', marginVertical: 12, textAlign: 'center' }}>
+            Camera Access Required
+          </Text>
+          <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 14, textAlign: 'center', marginBottom: 24, paddingHorizontal: 32 }}>
+            Enable camera access to take food photos for AI nutrition breakdown, or pick an existing photo from your library.
+          </Text>
           <Pressable
             onPress={requestPermission}
-            style={[styles.permissionButton, { backgroundColor: colors.primary }]}
+            style={[styles.permissionButton, { backgroundColor: colors.primary, marginBottom: 12 }]}
           >
             <Text style={styles.permissionButtonText}>Grant Permission</Text>
+          </Pressable>
+          <Pressable
+            onPress={handlePickImage}
+            style={[styles.permissionButton, { backgroundColor: 'rgba(255,255,255,0.15)', marginBottom: 12 }]}
+          >
+            <Text style={[styles.permissionButtonText, { color: '#fff' }]}>Pick from Photo Library</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => router.replace('/log/manual')}
+            style={[styles.permissionButton, { backgroundColor: 'transparent' }]}
+          >
+            <Text style={[styles.permissionButtonText, { color: colors.primary }]}>Enter Meal Manually</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -134,7 +181,7 @@ export default function CameraScreen() {
         </View>
 
         <View style={styles.bottomBar}>
-          <Pressable onPress={handleFlip} style={styles.iconButton}>
+          <Pressable onPress={handleFlip} style={styles.iconButton} disabled={processing}>
             <Ionicons name="camera-reverse-outline" size={28} color="#fff" />
           </Pressable>
 
@@ -146,13 +193,18 @@ export default function CameraScreen() {
             <View style={styles.captureInner} />
           </Pressable>
 
-          <View style={styles.iconButtonPlaceholder} />
+          <Pressable onPress={handlePickImage} style={styles.iconButton} disabled={processing}>
+            <Ionicons name="images-outline" size={28} color="#fff" />
+          </Pressable>
         </View>
 
         {processing && (
           <View style={styles.processingOverlay}>
-            <CoachAvatar />
+            <CoachAvatar size={40} />
             <ActivityIndicator color="#fff" size="large" style={styles.spinner} />
+            <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600', marginTop: 12 }}>
+              Analyzing meal...
+            </Text>
           </View>
         )}
       </CameraView>

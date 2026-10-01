@@ -108,13 +108,30 @@ export default function BarcodeScannerScreen() {
   if (!permission.granted) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: '#000' }]}>
+        <View style={styles.topBar}>
+          <Pressable onPress={handleClose} style={styles.iconButton}>
+            <Ionicons name="close" size={28} color="#fff" />
+          </Pressable>
+        </View>
         <View style={styles.permissionContainer}>
-          <Ionicons name="camera-outline" size={64} color="#fff" />
+          <Ionicons name="barcode-outline" size={64} color="#fff" />
+          <Text style={{ color: '#fff', fontSize: 18, fontWeight: '600', marginVertical: 12, textAlign: 'center' }}>
+            Camera Access Required
+          </Text>
+          <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 14, textAlign: 'center', marginBottom: 24, paddingHorizontal: 32 }}>
+            Enable camera access to scan product barcodes, or search our food database directly.
+          </Text>
           <Pressable
             onPress={requestPermission}
-            style={[styles.permissionButton, { backgroundColor: colors.primary }]}
+            style={[styles.permissionButton, { backgroundColor: colors.primary, marginBottom: 12 }]}
           >
             <Text style={styles.permissionButtonText}>Grant Permission</Text>
+          </Pressable>
+          <Pressable
+            onPress={handleSearchManually}
+            style={[styles.permissionButton, { backgroundColor: 'rgba(255,255,255,0.15)' }]}
+          >
+            <Text style={[styles.permissionButtonText, { color: '#fff' }]}>Search Food Database</Text>
           </Pressable>
         </View>
       </SafeAreaView>

@@ -24,6 +24,25 @@ function getColors(scheme: string) {
   return light;
 }
 
+type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack';
+
+const MEAL_LABELS: Record<MealType, string> = {
+  breakfast: 'Breakfast',
+  lunch: 'Lunch',
+  dinner: 'Dinner',
+  snack: 'Snack',
+};
+
+const MEAL_TYPES: MealType[] = ['breakfast', 'lunch', 'dinner', 'snack'];
+
+function getDefaultMealType(): MealType {
+  const hour = new Date().getHours();
+  if (hour < 11) return 'breakfast';
+  if (hour < 15) return 'lunch';
+  if (hour < 19) return 'dinner';
+  return 'snack';
+}
+
 export default function SearchScreen() {
   const colorScheme = useColorScheme() ?? 'dark';
   const colors = getColors(colorScheme);
@@ -33,6 +52,7 @@ export default function SearchScreen() {
   const [results, setResults] = useState<FoodSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [selected, setSelected] = useState<FoodSearchResult[]>([]);
+  const [mealType, setMealType] = useState<MealType>(getDefaultMealType);
   const [favorites, setFavorites] = useState<FoodFavorite[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
@@ -93,7 +113,7 @@ export default function SearchScreen() {
         serving_size: f.serving_size,
         source: f.source,
       }));
-      await createMeal({ meal_type: 'snack', foods });
+      await createMeal({ meal_type: mealType, foods });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.back();
     } catch {
@@ -101,7 +121,7 @@ export default function SearchScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [selected, submitting, router]);
+  }, [selected, mealType, submitting, router]);
 
   const isSelected = (food: FoodSearchResult) =>
     selected.some(f => f.name === food.name && f.source === food.source);
@@ -123,6 +143,34 @@ export default function SearchScreen() {
           autoCapitalize="none"
           autoCorrect={false}
         />
+      </View>
+
+      <View style={[styles.mealTypeRow, { borderBottomColor: colors.border }]}>
+        {MEAL_TYPES.map((type) => (
+          <Pressable
+            key={type}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setMealType(type);
+            }}
+            style={[
+              styles.mealPill,
+              {
+                backgroundColor: mealType === type ? colors.primary : colors.surface,
+                borderColor: mealType === type ? colors.primary : colors.border,
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.mealPillText,
+                { color: mealType === type ? '#fff' : colors.textSecondary },
+              ]}
+            >
+              {MEAL_LABELS[type]}
+            </Text>
+          </Pressable>
+        ))}
       </View>
 
       {selected.length > 0 && (
@@ -297,7 +345,7 @@ export default function SearchScreen() {
               <ActivityIndicator size="small" color="#fff" />
             ) : (
               <Text style={styles.addBtnText}>
-                Add Selected ({selected.length})
+                Add to {MEAL_LABELS[mealType]} ({selected.length})
               </Text>
             )}
           </Pressable>
@@ -328,6 +376,25 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.lg,
     paddingHorizontal: spacing.md,
     fontSize: fontSizes.md,
+  },
+  mealTypeRow: {
+    flexDirection: 'row' as const,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    gap: spacing.xs,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  mealPill: {
+    flex: 1,
+    paddingVertical: 6,
+    borderRadius: borderRadius.full,
+    borderWidth: 1,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  mealPillText: {
+    fontSize: 12,
+    fontWeight: '600' as const,
   },
   selectedWrap: {
     paddingHorizontal: spacing.lg,

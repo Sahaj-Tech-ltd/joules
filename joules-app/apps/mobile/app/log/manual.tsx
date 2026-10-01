@@ -7,6 +7,8 @@ import {
   ScrollView,
   StyleSheet,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -70,7 +72,7 @@ export default function ManualScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.replace({
         pathname: '/log/confirm',
-        params: { results: JSON.stringify(result) },
+        params: { results: JSON.stringify(result), mealType },
       });
     } catch {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -78,7 +80,7 @@ export default function ManualScreen() {
     } finally {
       setIdentifying(false);
     }
-  }, [text, identifying, router]);
+  }, [text, identifying, mealType, router]);
 
   const handleQuickAdd = useCallback(async (fav: FoodFavorite) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -103,18 +105,22 @@ export default function ManualScreen() {
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]} edges={['top']}>
-      <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <Pressable onPress={() => router.back()} style={styles.closeBtn} hitSlop={12}>
-          <Ionicons name="close" size={24} color={colors.textPrimary} />
-        </Pressable>
-        <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>Describe Your Meal</Text>
-      </View>
-
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1 }}
       >
+        <View style={[styles.header, { borderBottomColor: colors.border }]}>
+          <Pressable onPress={() => router.back()} style={styles.closeBtn} hitSlop={12}>
+            <Ionicons name="close" size={24} color={colors.textPrimary} />
+          </Pressable>
+          <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>Describe Your Meal</Text>
+        </View>
+
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+        >
         <TextInput
           style={[
             styles.textInput,
@@ -221,6 +227,7 @@ export default function ManualScreen() {
           </View>
         )}
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

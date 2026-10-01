@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, StyleSheet, TouchableOpacity } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { light, dark, oled, spacing, borderRadius, fontSizes } from '@joules/ui';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import type { FoodItem } from '@joules/api-client';
@@ -28,12 +29,12 @@ export default function FoodItemCard({ food, onChange }: FoodItemCardProps) {
   };
 
   return (
-    <TouchableOpacity
-      activeOpacity={0.7}
-      onPress={() => setExpanded(!expanded)}
-      style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}
-    >
-      <View style={styles.collapsedRow}>
+    <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <TouchableOpacity
+        activeOpacity={0.7}
+        onPress={() => setExpanded(!expanded)}
+        style={styles.collapsedRow}
+      >
         <View style={styles.nameCol}>
           <Text style={[styles.foodName, { color: colors.textPrimary }]} numberOfLines={1}>
             {localFood.name}
@@ -48,8 +49,14 @@ export default function FoodItemCard({ food, onChange }: FoodItemCardProps) {
               <Text style={[styles.badgeText, { color: colors.primary }]}>✓ Learned</Text>
             </View>
           )}
+          <Ionicons
+            name={expanded ? 'chevron-up' : 'chevron-down'}
+            size={18}
+            color={colors.textTertiary}
+            style={{ marginLeft: 6 }}
+          />
         </View>
-      </View>
+      </TouchableOpacity>
 
       {expanded && (
         <View style={styles.expandedContent}>
@@ -130,7 +137,7 @@ export default function FoodItemCard({ food, onChange }: FoodItemCardProps) {
           </View>
         </View>
       )}
-    </TouchableOpacity>
+    </View>
   );
 }
 
