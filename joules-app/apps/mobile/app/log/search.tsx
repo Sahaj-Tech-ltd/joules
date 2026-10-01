@@ -37,7 +37,7 @@ export default function SearchScreen() {
   const [submitting, setSubmitting] = useState(false);
 
   const inputRef = useRef<TextInput>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const hasSearched = useRef(false);
 
   useEffect(() => {

@@ -43,7 +43,9 @@
         {
           "icon": "./assets/images/notification-icon.png"
         }
-      ]
+      ],
+      "expo-font",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true

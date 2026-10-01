@@ -21,9 +21,10 @@ const oneLiners = [
 
 interface CoachAvatarProps {
   message?: string;
+  size?: number;
 }
 
-export default function CoachAvatar({ message }: CoachAvatarProps) {
+export default function CoachAvatar({ message, size = 64 }: CoachAvatarProps) {
   const colorScheme = useColorScheme() ?? 'dark';
   const colors = getColors(colorScheme);
 
@@ -88,22 +89,27 @@ export default function CoachAvatar({ message }: CoachAvatarProps) {
           {
             backgroundColor: `${colors.primary}33`,
             borderColor: colors.primary,
+            width: size,
+            height: size,
+            borderRadius: size / 2,
           },
           pulseStyle,
         ]}
       >
-        <Ionicons name="nutrition" size={28} color={colors.primary} />
+        <Ionicons name="nutrition" size={Math.max(14, Math.round(size * 0.44))} color={colors.primary} />
       </Animated.View>
-      <Animated.Text
-        style={[
-          styles.oneLiner,
-          { color: colors.textSecondary },
-          textStyle,
-        ]}
-        numberOfLines={1}
-      >
-        {displayMessage}
-      </Animated.Text>
+      {size >= 40 && (
+        <Animated.Text
+          style={[
+            styles.oneLiner,
+            { color: colors.textSecondary },
+            textStyle,
+          ]}
+          numberOfLines={1}
+        >
+          {displayMessage}
+        </Animated.Text>
+      )}
     </View>
   );
 }
