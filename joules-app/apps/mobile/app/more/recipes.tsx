@@ -69,16 +69,16 @@ function RecipeCard({
       },
       onPanResponderRelease: (_, gs) => {
         if (gs.dx < swipeThreshold) {
-          Animated.spring(swipeX, { toValue: -90, useNativeDriver: false }).start();
+          Animated.spring(swipeX, { toValue: -90, useNativeDriver: true }).start();
         } else {
-          Animated.spring(swipeX, { toValue: 0, useNativeDriver: false }).start();
+          Animated.spring(swipeX, { toValue: 0, useNativeDriver: true }).start();
         }
       },
     })
   ).current;
 
   const handleDelete = () => {
-    Animated.spring(swipeX, { toValue: 0, useNativeDriver: false }).start(() => {
+    Animated.spring(swipeX, { toValue: 0, useNativeDriver: true }).start(() => {
       onDelete(recipe.id);
     });
   };

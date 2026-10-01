@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -27,8 +28,13 @@ function getColors(scheme: string) {
 const DAILY_FREE_LIMIT = 5;
 
 function formatTime(dateStr: string): string {
-  const d = new Date(dateStr);
-  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  } catch {
+    return '';
+  }
 }
 
 function isToday(dateStr: string): boolean {
@@ -109,7 +115,7 @@ export default function CoachScreen() {
   const loadMessages = useCallback(async () => {
     try {
       const data = await fetchCoachMessages(50);
-      setMessages(data.reverse());
+      setMessages([...data].reverse());
     } catch {
       // silently fail
     } finally {
@@ -154,10 +160,11 @@ export default function CoachScreen() {
       const response = await sendCoachMessage(text);
       setMessages((prev) => [...prev.filter((m) => m.id !== optimisticUser.id), optimisticUser, response]);
       scrollToBottom();
-    } catch {
+    } catch (err: any) {
       setMessages((prev) => prev.filter((m) => m.id !== optimisticUser.id));
       setInputText(text);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert('Coach', err?.message || 'Could not send message. Please check your connection.');
     } finally {
       setSending(false);
     }

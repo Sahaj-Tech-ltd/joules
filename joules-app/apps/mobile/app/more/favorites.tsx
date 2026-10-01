@@ -64,6 +64,14 @@ export default function FavoritesScreen() {
     }, 200);
   }, []);
 
+function getDefaultMealType(): string {
+  const hour = new Date().getHours();
+  if (hour < 11) return 'breakfast';
+  if (hour < 15) return 'lunch';
+  if (hour < 19) return 'dinner';
+  return 'snack';
+}
+
   const logFavorite = useCallback(async (fav: FoodFavorite) => {
     if (logging) return;
     setLogging(true);
@@ -81,7 +89,7 @@ export default function FavoritesScreen() {
           source: fav.source,
         },
       ];
-      await createMeal({ meal_type: 'snack', foods });
+      await createMeal({ meal_type: getDefaultMealType(), foods });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setFavorites((prev) =>
         prev.map((f) => (f.id === fav.id ? { ...f, use_count: f.use_count + 1 } : f)).sort((a, b) => b.use_count - a.use_count)
