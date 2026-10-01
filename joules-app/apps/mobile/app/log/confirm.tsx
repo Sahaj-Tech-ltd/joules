@@ -54,7 +54,7 @@ export default function ConfirmScreen() {
   const colorScheme = useColorScheme() ?? 'dark';
   const colors = getColors(colorScheme);
   const router = useRouter();
-  const { photo, results } = useLocalSearchParams<{ photo?: string; results?: string }>();
+  const { photo, photoUri, results } = useLocalSearchParams<{ photo?: string; photoUri?: string; results?: string }>();
 
   const [foods, setFoods] = useState<FoodItem[]>([]);
   const [mealType, setMealType] = useState<string>(getDefaultMealType());
@@ -139,6 +139,7 @@ export default function ConfirmScreen() {
   const totalCalories = foods.reduce((sum, f) => sum + f.calories, 0);
 
   const decodedPhoto = photo ? decodeURIComponent(photo) : null;
+  const imageSource = photoUri ? { uri: photoUri } : decodedPhoto ? { uri: `data:image/jpeg;base64,${decodedPhoto}` } : null;
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -157,10 +158,10 @@ export default function ConfirmScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {decodedPhoto && (
+        {imageSource && (
           <View style={[styles.photoPreview, { borderColor: colors.border }]}>
             <Image
-              source={{ uri: `data:image/jpeg;base64,${decodedPhoto}` }}
+              source={imageSource}
               style={styles.photo}
               resizeMode="cover"
             />

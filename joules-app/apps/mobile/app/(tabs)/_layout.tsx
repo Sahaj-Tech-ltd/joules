@@ -1,10 +1,10 @@
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
+import * as Haptics from 'expo-haptics';
 import { light, dark, oled, spacing } from '@joules/ui';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import FAB from '@/components/FAB';
 
 function getColors(scheme: string) {
   if (scheme === 'dark') return dark;
@@ -12,13 +12,20 @@ function getColors(scheme: string) {
   return light;
 }
 
-function TabIcon({ name, color, focused }: { name: keyof typeof Ionicons.glyphMap; color: string; focused: boolean }) {
-  return (
-    <View style={[styles.iconWrap, focused && styles.iconWrapActive]}>
-      <Ionicons name={focused ? name : `${name}-outline` as any} size={24} color={color} />
-    </View>
-  );
+interface TabDef {
+  name: string;
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  outlineIcon: keyof typeof Ionicons.glyphMap;
 }
+
+const TABS: TabDef[] = [
+  { name: 'index', label: 'Today', icon: 'flame', outlineIcon: 'flame-outline' },
+  { name: 'log', label: 'Log', icon: 'receipt', outlineIcon: 'receipt-outline' },
+  { name: 'coach', label: 'Coach', icon: 'sparkles', outlineIcon: 'sparkles-outline' },
+  { name: 'progress', label: 'Progress', icon: 'stats-chart', outlineIcon: 'stats-chart-outline' },
+  { name: 'more', label: 'More', icon: 'person-circle', outlineIcon: 'person-circle-outline' },
+];
 
 export default function TabLayout() {
   const colorScheme = useColorScheme() ?? 'dark';
@@ -28,99 +35,63 @@ export default function TabLayout() {
     <View style={styles.wrapper}>
       <Tabs
         screenOptions={{
-          tabBarActiveTintColor: colors.primary,
-          tabBarInactiveTintColor: colors.textTertiary,
-          tabBarStyle: {
-            backgroundColor: colors.surface,
-            borderTopColor: colors.border,
-            borderTopWidth: 1,
-            height: 80,
-            paddingBottom: 20,
-            paddingTop: spacing.sm,
-          },
-          tabBarLabelStyle: {
-            fontSize: 11,
-            fontWeight: '600' as const,
-            marginTop: 2,
-          },
-          headerStyle: {
-            backgroundColor: colors.background,
-          },
-          headerTintColor: colors.textPrimary,
-          headerTitleStyle: {
-            fontWeight: '700' as const,
-          },
+          headerShown: false,
         }}
-        tabBar={(props) => {
-          const { state, descriptors, navigation } = props;
+        tabBar={({ state, navigation }) => {
           return (
             <View style={[styles.tabBar, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
-              {state.routes.map((route, index) => {
-                const { options } = descriptors[route.key];
+              {TABS.map((tab, index) => {
                 const isFocused = state.index === index;
-                const label = options.tabBarLabel ?? options.title ?? route.name;
-
-                if (route.name === 'log') {
-                  return (
-                    <View key={route.name} style={styles.logTabWrap}>
-                      <FAB />
-                    </View>
-                  );
-                }
-
-                const iconMap: Record<string, keyof typeof Ionicons.glyphMap> = {
-                  index: 'home',
-                  log: 'camera',
-                  coach: 'chatbubbles',
-                  progress: 'stats-chart',
-                  more: 'ellipsis-horizontal',
-                };
+                const activeColor = colors.primary;
+                const inactiveColor = colors.textTertiary;
 
                 const onPress = () => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   const event = navigation.emit({
                     type: 'tabPress',
-                    target: route.key,
+                    target: state.routes[index]?.key || tab.name,
                     canPreventDefault: true,
                   });
                   if (!isFocused && !event.defaultPrevented) {
-                    navigation.navigate(route.name);
+                    navigation.navigate(tab.name);
                   }
                 };
 
                 return (
-                  <View key={route.name} style={styles.tabItem}>
-                    <TabIcon
-                      name={iconMap[route.name] ?? 'ellipse'}
-                      color={isFocused ? colors.primary : colors.textTertiary}
-                      focused={isFocused}
+                  <Pressable
+                    key={tab.name}
+                    onPress={onPress}
+                    style={styles.tabItem}
+                    hitSlop={8}
+                  >
+                    <Ionicons
+                      name={isFocused ? tab.icon : tab.outlineIcon}
+                      size={24}
+                      color={isFocused ? activeColor : inactiveColor}
                     />
-                  </View>
+                    <Text
+                      style={[
+                        styles.tabLabel,
+                        { color: isFocused ? activeColor : inactiveColor, fontWeight: isFocused ? '700' : '500' },
+                      ]}
+                    >
+                      {tab.label}
+                    </Text>
+                    {isFocused && (
+                      <View style={[styles.activeDot, { backgroundColor: activeColor }]} />
+                    )}
+                  </Pressable>
                 );
               })}
             </View>
           );
         }}
       >
-        <Tabs.Screen
-          name="index"
-          options={{ title: 'Home', headerShown: false }}
-        />
-        <Tabs.Screen
-          name="log"
-          options={{ title: '', headerShown: false }}
-        />
-        <Tabs.Screen
-          name="coach"
-          options={{ title: 'Coach', headerShown: true }}
-        />
-        <Tabs.Screen
-          name="progress"
-          options={{ title: 'Progress', headerShown: true }}
-        />
-        <Tabs.Screen
-          name="more"
-          options={{ title: 'More', headerShown: true }}
-        />
+        <Tabs.Screen name="index" options={{ title: 'Today' }} />
+        <Tabs.Screen name="log" options={{ title: 'Log' }} />
+        <Tabs.Screen name="coach" options={{ title: 'Coach' }} />
+        <Tabs.Screen name="progress" options={{ title: 'Progress' }} />
+        <Tabs.Screen name="more" options={{ title: 'More' }} />
       </Tabs>
     </View>
   );
@@ -131,31 +102,30 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   tabBar: {
-    flexDirection: 'row' as const,
+    flexDirection: 'row',
     borderTopWidth: 1,
-    height: 80,
-    paddingBottom: 20,
-    paddingTop: spacing.sm,
-    alignItems: 'center' as const,
-    justifyContent: 'space-around' as const,
+    height: 84,
+    paddingBottom: 24,
+    paddingTop: 8,
+    alignItems: 'center',
+    justifyContent: 'space-around',
   },
   tabItem: {
     flex: 1,
-    alignItems: 'center' as const,
-    justifyContent: 'center' as const,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 2,
+    position: 'relative',
   },
-  logTabWrap: {
-    flex: 1,
-    alignItems: 'center' as const,
-    justifyContent: 'flex-end' as const,
-    paddingBottom: 0,
+  tabLabel: {
+    fontSize: 10,
+    marginTop: 3,
+    letterSpacing: 0.2,
   },
-  iconWrap: {
-    alignItems: 'center' as const,
-    justifyContent: 'center' as const,
-    paddingVertical: 4,
-  },
-  iconWrapActive: {
-    opacity: 1,
+  activeDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    marginTop: 2,
   },
 });

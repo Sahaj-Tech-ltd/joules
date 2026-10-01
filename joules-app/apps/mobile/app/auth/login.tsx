@@ -35,15 +35,17 @@ export default function LoginScreen() {
     if (!serverUrl.trim()) return;
     setConnecting(true);
     try {
-      const res = await fetch(`${serverUrl.replace(/\/+$/, '')}/api/banners`);
+      const clean = serverUrl.trim().replace(/\/+$/, '');
+      const testUrl = clean.endsWith('/api') ? `${clean}/banners` : `${clean}/api/banners`;
+      const res = await fetch(testUrl);
       if (res.ok) {
-        setBaseUrl(serverUrl.replace(/\/+$/, ''));
-        Alert.alert('Connected', 'Server URL saved.');
+        setBaseUrl(clean);
+        Alert.alert('Connected', `Successfully connected to: ${useAuthStore.getState().baseUrl}`);
       } else {
-        Alert.alert('Error', 'Server did not respond correctly.');
+        Alert.alert('Error', `Server returned status ${res.status}. Check URL.`);
       }
     } catch {
-      Alert.alert('Error', 'Could not reach server.');
+      Alert.alert('Error', 'Could not reach server. Verify IP, port, and network connection.');
     } finally {
       setConnecting(false);
     }

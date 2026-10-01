@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
@@ -62,12 +62,24 @@ export default function CameraScreen() {
       router.replace({
         pathname: '/log/confirm',
         params: {
-          photo: encodeURIComponent(base64),
+          photoUri: manipulated.uri,
           results: JSON.stringify(identifyResult),
         },
       });
-    } catch {
+    } catch (err: any) {
       setProcessing(false);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert(
+        'Could Not Identify Meal',
+        err?.message || 'AI vision service was unable to analyze this photo. Would you like to enter it manually?',
+        [
+          { text: 'Try Again', style: 'cancel' },
+          {
+            text: 'Enter Manually',
+            onPress: () => router.replace('/log/manual'),
+          },
+        ]
+      );
     }
   };
 
