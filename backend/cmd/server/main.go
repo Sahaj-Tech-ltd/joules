@@ -187,6 +187,7 @@ func main() {
 
 	r := chi.NewRouter()
 
+	r.Use(middleware.CleanPath)
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
@@ -300,9 +301,7 @@ func main() {
 			r.Use(auth.JWTMiddleware(cfg.JWTSecret))
 			r.Post("/identify", mealHandler.IdentifyFood)
 			r.Post("/", mealHandler.CreateMeal)
-			r.Post("", mealHandler.CreateMeal)
 			r.Get("/", mealHandler.GetMealsByDate)
-			r.Get("", mealHandler.GetMealsByDate)
 			r.Get("/recent", mealHandler.GetRecentMeals)
 			r.Post("/carry-forward", mealHandler.CarryForward)
 			r.Post("/from-recipe/{recipeId}", mealHandler.LogMealFromRecipe)
@@ -315,9 +314,7 @@ func main() {
 			r.Use(auth.JWTMiddleware(cfg.JWTSecret))
 			r.Use(featureGate(pool, "recipes"))
 			r.Get("/", recipeHandler.List)
-			r.Get("", recipeHandler.List)
 			r.Post("/", recipeHandler.Create)
-			r.Post("", recipeHandler.Create)
 			r.Delete("/{id}", recipeHandler.Delete)
 		})
 
@@ -331,25 +328,19 @@ func main() {
 		r.Route("/weight", func(r chi.Router) {
 			r.Use(auth.JWTMiddleware(cfg.JWTSecret))
 			r.Post("/", weightHandler.LogWeight)
-			r.Post("", weightHandler.LogWeight)
 			r.Get("/", weightHandler.GetWeightHistory)
-			r.Get("", weightHandler.GetWeightHistory)
 		})
 
 		r.Route("/water", func(r chi.Router) {
 			r.Use(auth.JWTMiddleware(cfg.JWTSecret))
 			r.Post("/", waterHandler.LogWater)
-			r.Post("", waterHandler.LogWater)
 			r.Get("/", waterHandler.GetWaterByDate)
-			r.Get("", waterHandler.GetWaterByDate)
 		})
 
 		registerExerciseRoutes := func(r chi.Router) {
 			r.Use(auth.JWTMiddleware(cfg.JWTSecret))
 			r.Post("/", exerciseHandler.LogExercise)
-			r.Post("", exerciseHandler.LogExercise)
 			r.Get("/", exerciseHandler.GetExercisesByDate)
-			r.Get("", exerciseHandler.GetExercisesByDate)
 		}
 		r.Route("/exercises", registerExerciseRoutes)
 		r.Route("/exercise", registerExerciseRoutes)
@@ -378,17 +369,14 @@ func main() {
 			r.Use(auth.JWTMiddleware(cfg.JWTSecret))
 			r.Use(featureGate(pool, "achievements"))
 			r.Get("/", achievementHandler.GetAchievements)
-			r.Get("", achievementHandler.GetAchievements)
 			r.Post("/check", achievementHandler.CheckAchievements)
 		})
 
 		r.Route("/favorites", func(r chi.Router) {
 			r.Use(auth.JWTMiddleware(cfg.JWTSecret))
 			r.Get("/", favoritesHandler.GetFavorites)
-			r.Get("", favoritesHandler.GetFavorites)
 			r.Get("/top", favoritesHandler.GetTopFavorites)
 			r.Post("/", favoritesHandler.AddFavorite)
-			r.Post("", favoritesHandler.AddFavorite)
 			r.Delete("/{id}", favoritesHandler.RemoveFavorite)
 			r.Post("/{id}/use", favoritesHandler.LogFromFavorite)
 		})
@@ -408,9 +396,7 @@ func main() {
 				r.Use(auth.JWTMiddleware(cfg.JWTSecret))
 				r.Use(featureGate(pool, "steps"))
 				r.Get("/", stepsHandler.GetSteps)
-				r.Get("", stepsHandler.GetSteps)
 				r.Post("/", stepsHandler.LogSteps)
-				r.Post("", stepsHandler.LogSteps)
 				r.Get("/history", stepsHandler.GetStepsHistory)
 				r.Get("/google/status", stepsHandler.GoogleStatus)
 				r.Get("/google/connect", stepsHandler.GoogleConnect)
@@ -463,9 +449,7 @@ func main() {
 		registerIntentionsRoutes := func(r chi.Router) {
 			r.Use(auth.JWTMiddleware(cfg.JWTSecret))
 			r.Get("/", intentionsHandler.List)
-			r.Get("", intentionsHandler.List)
 			r.Post("/", intentionsHandler.Create)
-			r.Post("", intentionsHandler.Create)
 			r.Put("/{id}", intentionsHandler.Update)
 			r.Delete("/{id}", intentionsHandler.Delete)
 		}
