@@ -223,7 +223,14 @@ func (h *Handler) searchOFF(r *http.Request, q string) []FoodResult {
 		url.QueryEscape(q),
 	)
 
-	resp, err := h.httpClient.Get(offURL)
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, offURL, nil)
+	if err != nil {
+		slog.Warn("foods: OFF search request creation failed", "error", err)
+		return nil
+	}
+	req.Header.Set("User-Agent", "Joules - iOS/Web - Version 1.0 - https://github.com/Sahaj-Tech-ltd/joules")
+
+	resp, err := h.httpClient.Do(req)
 	if err != nil {
 		slog.Warn("foods: OFF search request failed", "error", err)
 		return nil
@@ -281,7 +288,14 @@ func (h *Handler) GetByBarcode(w http.ResponseWriter, r *http.Request) {
 
 	// Fall back to OFF API
 	offURL := fmt.Sprintf("https://world.openfoodfacts.org/api/v2/product/%s.json", url.PathEscape(upc))
-	resp, err := h.httpClient.Get(offURL)
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, offURL, nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("failed to create request: %w", err))
+		return
+	}
+	req.Header.Set("User-Agent", "Joules - iOS/Web - Version 1.0 - https://github.com/Sahaj-Tech-ltd/joules")
+
+	resp, err := h.httpClient.Do(req)
 	if err != nil {
 		slog.Warn("foods: OFF barcode request failed", "error", err)
 		writeError(w, http.StatusNotFound, fmt.Errorf("product not found"))

@@ -272,8 +272,8 @@ func (h *Handler) RegisterExpoPush(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("token is required"))
 		return
 	}
-	if req.Platform != "ios" && req.Platform != "android" {
-		writeError(w, http.StatusBadRequest, errors.New("platform must be 'ios' or 'android'"))
+	if req.Platform != "ios" && req.Platform != "android" && req.Platform != "web" {
+		writeError(w, http.StatusBadRequest, errors.New("platform must be 'ios', 'android', or 'web'"))
 		return
 	}
 

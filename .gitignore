@@ -20,7 +20,8 @@ docs/superpowers/
 *.out
 *.o
 *.a
-backend/cmd/server/dist/
+backend/cmd/server/dist/*
+!backend/cmd/server/dist/index.html
 
 # Node / Frontend
 node_modules/

@@ -286,12 +286,35 @@ func (h *Handler) IdentifyFood(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Photo == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("photo is required"))
+		writeError(w, http.StatusBadRequest, fmt.Errorf("photo or description is required"))
 		return
 	}
 
-	imageBytes, _, err := decodePhotoData(req.Photo, userID)
+	trimmed := strings.TrimSpace(req.Photo)
+	isDataURL := strings.HasPrefix(trimmed, "data:image/")
+
+	// If it doesn't look like base64 image data (e.g. natural language meal description), identify via text
+	if !isDataURL && len(trimmed) < 400 && !strings.Contains(trimmed, "+") && !strings.Contains(trimmed, "/") {
+		if h.ai != nil {
+			foods, err := h.ai.IdentifyFoodFromText(trimmed, req.PortionHint)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, fmt.Errorf("text food identification failed: %w", err))
+				return
+			}
+			writeJSON(w, http.StatusOK, apiResponse{Data: foods})
+			return
+		}
+	}
+
+	imageBytes, _, err := decodePhotoData(trimmed, userID)
 	if err != nil {
+		// Fallback: If base64 decoding fails, attempt text-based food parsing
+		if h.ai != nil {
+			if foods, textErr := h.ai.IdentifyFoodFromText(trimmed, req.PortionHint); textErr == nil {
+				writeJSON(w, http.StatusOK, apiResponse{Data: foods})
+				return
+			}
+		}
 		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid photo: %w", err))
 		return
 	}
@@ -458,27 +481,31 @@ func (h *Handler) CreateMeal(w http.ResponseWriter, r *http.Request) {
 }
 
 func decodePhotoData(dataURL, userID string) ([]byte, string, error) {
+	var b64Data string
+	ext := ".jpg"
+
 	commaIdx := strings.Index(dataURL, ",")
-	if commaIdx == -1 {
-		return nil, "", errors.New("invalid data URL format")
-	}
-
-	header := dataURL[:commaIdx]
-	b64Data := dataURL[commaIdx+1:]
-
-	var ext string
-	switch {
-	case strings.Contains(header, "image/png"):
-		ext = ".png"
-	case strings.Contains(header, "image/webp"):
-		ext = ".webp"
-	default:
-		ext = ".jpg"
+	if commaIdx != -1 {
+		header := dataURL[:commaIdx]
+		b64Data = dataURL[commaIdx+1:]
+		switch {
+		case strings.Contains(header, "image/png"):
+			ext = ".png"
+		case strings.Contains(header, "image/webp"):
+			ext = ".webp"
+		default:
+			ext = ".jpg"
+		}
+	} else {
+		b64Data = strings.TrimSpace(dataURL)
 	}
 
 	imageBytes, err := base64.StdEncoding.DecodeString(b64Data)
 	if err != nil {
-		return nil, "", fmt.Errorf("decode base64: %w", err)
+		imageBytes, err = base64.RawStdEncoding.DecodeString(b64Data)
+		if err != nil {
+			return nil, "", fmt.Errorf("decode base64: %w", err)
+		}
 	}
 
 	filename := uuid.New().String() + ext

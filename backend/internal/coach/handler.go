@@ -1473,11 +1473,17 @@ func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
 
 	plan := auth.GetPlan(ctx)
 	if plan == "free" {
+		tz := r.Header.Get("X-Timezone")
+		if tz == "" {
+			tz = "UTC"
+		}
 		var msgCount int
 		_ = h.pool.QueryRow(ctx,
-			`SELECT COUNT(*)::int FROM coach_messages WHERE user_id = $1 AND role = 'user' AND created_at::date = CURRENT_DATE`,
-			userID).Scan(&msgCount)
-		if msgCount > 5 {
+			`SELECT COUNT(*)::int FROM coach_messages
+			 WHERE user_id = $1 AND role = 'user'
+			   AND (created_at AT TIME ZONE COALESCE($2, 'UTC'))::date = (NOW() AT TIME ZONE COALESCE($2, 'UTC'))::date`,
+			userID, tz).Scan(&msgCount)
+		if msgCount >= 5 {
 			writeError(w, http.StatusTooManyRequests, errors.New("You've reached your daily coach limit. Upgrade to Premium for unlimited conversations."))
 			return
 		}
